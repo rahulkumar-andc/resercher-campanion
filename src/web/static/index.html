@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autonomous Research Companion — 6-Layer Multi-Agent System</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="container">
+    
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <div class="logo-icon">RC</div>
+        <div class="title-area">
+          <h1>Autonomous Research Companion</h1>
+          <p>6-Layer Supervised Multi-Agent Engine & Research Synthesizer</p>
+        </div>
+      </div>
+      <div class="badge-status">
+        <span class="pulse-dot"></span>
+        <span id="system-status-text">Layer 6 Supervisor Active</span>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="dashboard-grid">
+      
+      <!-- Input Panel -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">1. Input Configuration</h2>
+          <button class="btn-secondary" id="btn-load-sample">Load Sample Demo</button>
+        </div>
+
+        <form id="pipeline-form">
+          <div class="form-group">
+            <label class="form-label" for="topic-input">Research Topic / Title</label>
+            <input type="text" id="topic-input" class="form-input" placeholder="e.g. Autonomous Multi-Agent Code Profiling & Literature Grounding" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Upload Source Code Files (.py, .js, .cpp, .rs, etc.)</label>
+            <div class="file-dropzone" onclick="document.getElementById('code-input').click()">
+              <p id="code-file-label">Click or drop source code files here</p>
+              <input type="file" id="code-input" class="file-input" multiple>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Upload Notes / Reference PDFs (.txt, .md, .pdf)</label>
+            <div class="file-dropzone" onclick="document.getElementById('notes-input').click()">
+              <p id="notes-file-label">Click or drop user notes or PDFs here</p>
+              <input type="file" id="notes-input" class="file-input" multiple>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" id="btn-submit">
+            <span>▶ Execute 6-Layer Multi-Agent Pipeline</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Execution & Visual Pipeline -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">2. Agent Pipeline Orchestration</h2>
+          <span class="layer-badge" id="current-job-badge">Idle</span>
+        </div>
+
+        <div class="pipeline-flow">
+          <div class="layer-node" id="node-layer-1">
+            <div class="layer-info">
+              <h4>Layer 1: Input & Parsing</h4>
+              <p>Code Ingestor, Data Ingestor, Style Agent, Query Parser</p>
+            </div>
+            <span class="layer-badge">Ready</span>
+          </div>
+
+          <div class="layer-node" id="node-layer-2">
+            <div class="layer-info">
+              <h4>Layer 2: Code Analysis</h4>
+              <p>Code Breaker, Algo Detector, Complexity Profiler, HW Mapper, Bug Finder</p>
+            </div>
+            <span class="layer-badge">Ready</span>
+          </div>
+
+          <div class="layer-node" id="node-layer-3">
+            <div class="layer-info">
+              <h4>Layer 3: Research Grounding</h4>
+              <p>ArXiv Agent, CS Agent, Electronics Agent, Novelty Gap Finder</p>
+            </div>
+            <span class="layer-badge">Ready</span>
+          </div>
+
+          <div class="layer-node" id="node-layer-4">
+            <div class="layer-info">
+              <h4>Layer 4: Synthesis & Structure</h4>
+              <p>Context Connector, Outline Builder, Citation Agent, Critic Agent</p>
+            </div>
+            <span class="layer-badge">Ready</span>
+          </div>
+
+          <div class="layer-node" id="node-layer-5">
+            <div class="layer-info">
+              <h4>Layer 5: Output Generation</h4>
+              <p>Writer Agent, PDF Paper Compiler, Presentation PPTX Generator</p>
+            </div>
+            <span class="layer-badge">Ready</span>
+          </div>
+        </div>
+
+        <!-- Downloads & Deliverables -->
+        <div class="exports-group">
+          <a href="/api/download/pdf" class="download-card" id="btn-dl-pdf" target="_blank">
+            <div class="download-icon">📄</div>
+            <div>
+              <div style="font-weight:600; font-size:0.9rem;">ResearchPaper.pdf</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">IEEE Academic Manuscript</div>
+            </div>
+          </a>
+
+          <a href="/api/download/pptx" class="download-card" id="btn-dl-pptx" target="_blank">
+            <div class="download-icon">📊</div>
+            <div>
+              <div style="font-weight:600; font-size:0.9rem;">Presentation.pptx</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">Widescreen Slide Deck</div>
+            </div>
+          </a>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Live Terminal Stream -->
+    <div class="card terminal-card">
+      <div class="card-header">
+        <h2 class="card-title">3. Layer 6 Event Bus — Live Agent Activity Log</h2>
+        <button class="btn-secondary" onclick="document.getElementById('terminal-logs').innerHTML=''">Clear Console</button>
+      </div>
+      <div class="terminal-window" id="terminal-logs">
+        <div class="log-line INFO">[SYS] SupervisorAgent | System initialized. Ready to execute multi-agent research runs.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
