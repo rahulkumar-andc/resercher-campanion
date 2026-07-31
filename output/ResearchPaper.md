@@ -1,4 +1,4 @@
-# Technical Manuscript: AI
+# Technical Manuscript: High-Performance Multi-Agent Event-Driven Systems
 
 **Authors:** AntiGravity Multi-Agent Research System
 **Supervisor Engine:** Layer 6 Event Bus Router
@@ -9,7 +9,7 @@
 - Key algorithmic findings
 
 ## 2. Introduction
-- Background on AI
+- Background on High-Performance Multi-Agent Event-Driven Systems
 - Motivation and system objectives
 - Key contributions
 
@@ -34,7 +34,7 @@
 - Future extensions
 
 ### Algorithmic Breakdown
-- Total Files: 0
-- Total Lines: 0
-- Primary Algorithms: Modular Pipeline Execution
+- Total Files: 1
+- Total Lines: 34
+- Primary Algorithms: Event-Driven Architecture / Message Bus, Async Concurrent Task Pipeline, Hash Indexing & Lookup
 
