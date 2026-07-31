@@ -14,20 +14,23 @@ from src.agents.layer4_5_qa import (
     FormatQualityAuditorAgent
 )
 from src.core.upskill_engine import AgentTraceLogger, SkillEvaluator
+from src.core.hybrid_engine import HybridNeuralEngine
 from src.agents.layer5_output import WriterAgent, PDFAgent, PPTAgent
 
 
 class SupervisorAgent:
-    """Layer 6 Central Orchestrator & Router supervising all 6 multi-agent execution layers with HF Upskill tracing."""
+    """Layer 6 Central Orchestrator supervising 6 execution layers with Hybrid Mamba-Transformer & HF Upskill."""
 
     def __init__(self, bus: Optional[SupervisorBus] = None):
         self.bus = bus or SupervisorBus()
 
-        # Initialize Hugging Face Upskill Evaluator & Tracing Engine
+        # Initialize Hugging Face Upskill & Hybrid Mamba-Transformer Engine
         self.trace_logger = AgentTraceLogger()
         self.skill_evaluator = SkillEvaluator()
+        self.hybrid_engine = HybridNeuralEngine()
 
         # Initialize agents
+
 
         # Layer 1
         self.code_ingestor = CodeIngestor(self.bus)
@@ -102,6 +105,19 @@ class SupervisorAgent:
             self.outline_builder.run(ctx)
             self.citation_agent.run(ctx)
             self.critic_agent.run(ctx)
+
+            # Hybrid Mamba-Transformer Routing Execution
+            hybrid_metrics = self.hybrid_engine.process_hybrid_pipeline(
+                raw_code_text=ctx.raw_code_paths,
+                arxiv_papers=ctx.research.arxiv_papers if ctx.research else []
+            )
+            self.bus.publish(
+                ctx,
+                "SupervisorAgent",
+                6,
+                f"Hybrid Neural Engine Active: Mamba scanned {hybrid_metrics['mamba_ssm_tokens']} tokens in {hybrid_metrics['mamba_speed_ms']}ms | Transformer matched {hybrid_metrics['transformer_qkv_matches']} QKV attention patterns."
+            )
+
 
             # Stage 4.5: Quality Audit & Peer Review
             self.bus.set_stage(ctx, PipelineStage.QUALITY_AUDIT, "Layer 4.5 auditing Plagiarism, AI Footprint, Formatting & 7 Reviewer Questions")

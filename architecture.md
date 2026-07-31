@@ -185,5 +185,7 @@ flowchart TD
 ### Hugging Face Upskill Integration Engine (`src/core/upskill_engine.py`)
 - **AgentTraceLogger**: Captures full execution traces, inputs, outputs, and timestamps across all 27 agents.
 - **SkillEvaluator**: Evaluates multi-agent accuracy across 4 academic dimensions (`academic_accuracy`, `citation_grounding`, `structural_coherence`, `reproducibility_score`) ensuring overall accuracy score >= 90.0%.
-
-
+### Hybrid Mamba-Transformer Neural Engine (`src/core/hybrid_engine.py`)
+- **Mamba Linear Scanner (`MambaLinearScanner`)**: $O(N)$ state-space model for rapid ingestion of large codebases and multi-page PDF notes.
+- **Transformer Attention Synthesizer (`TransformerAttentionSynthesizer`)**: Dense self-attention QKV engine connecting AST nodes to ArXiv citations.
+- **Hybrid Neural Router**: Routes high-volume linear context into self-attention reasoning spaces.

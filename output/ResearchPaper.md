@@ -1,4 +1,4 @@
-# Technical Manuscript: High-Performance Multi-Agent Event-Driven Systems
+# Technical Manuscript: Hybrid Mamba-Transformer Autonomous Systems
 
 **Authors:** AntiGravity Multi-Agent Research System
 **Supervisor Engine:** Layer 6 Event Bus Router
@@ -9,7 +9,7 @@
 - Key algorithmic findings
 
 ## 2. Introduction
-- Background on High-Performance Multi-Agent Event-Driven Systems
+- Background on Hybrid Mamba-Transformer Autonomous Systems
 - Motivation and system objectives
 - Key contributions
 
