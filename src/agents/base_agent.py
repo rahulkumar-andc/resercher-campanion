@@ -1,16 +1,20 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext
+from src.core.llm_client import LocalLLMClient
 
 
 class BaseAgent(ABC):
-    def __init__(self, name: str, layer: int, bus: SupervisorBus):
+    def __init__(self, name: str, layer: int, bus: SupervisorBus, llm_client: Optional[LocalLLMClient] = None):
         self.name = name
         self.layer = layer
         self.bus = bus
+        self.llm = llm_client or LocalLLMClient()
 
     def log(self, ctx: PipelineContext, message: str, level: str = "INFO", data: dict = None):
         self.bus.publish(ctx, agent_name=self.name, layer=self.layer, content=message, level=level, data=data)
+
 
     @abstractmethod
     def run(self, ctx: PipelineContext) -> None:

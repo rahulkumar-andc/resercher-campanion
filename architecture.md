@@ -188,4 +188,7 @@ flowchart TD
 ### Hybrid Mamba-Transformer Neural Engine (`src/core/hybrid_engine.py`)
 - **Mamba Linear Scanner (`MambaLinearScanner`)**: $O(N)$ state-space model for rapid ingestion of large codebases and multi-page PDF notes.
 - **Transformer Attention Synthesizer (`TransformerAttentionSynthesizer`)**: Dense self-attention QKV engine connecting AST nodes to ArXiv citations.
-- **Hybrid Neural Router**: Routes high-volume linear context into self-attention reasoning spaces.
+### Local LLM & Ollama Connector Engine (`src/core/llm_client.py`)
+- **Supported Models**: `deepseek-r1:14b` / `32b` (Deep Chain-of-Thought Reasoning), `qwen2.5-coder:14b` / `32b` (AST Code Analysis & HW Mapping), `llama3.3:70b` (IEEE Paper Synthesis).
+- **Inference Router**: Local Ollama REST API (`http://localhost:11434`) with automatic fallback offline mode for unit testing.
+
