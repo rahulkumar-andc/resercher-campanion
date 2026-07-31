@@ -15,6 +15,7 @@ flowchart TD
     classDef l2 fill:#e74c3c,stroke:#c0392b,color:white;
     classDef l3 fill:#2ecc71,stroke:#27ae60,color:white;
     classDef l4 fill:#f39c12,stroke:#d68910,color:white;
+    classDef l45 fill:#d35400,stroke:#a04000,color:white;
     classDef l5 fill:#34495e,stroke:#2c3e50,color:white;
     classDef io fill:#95a5a6,stroke:#7f8c8d,color:black,stroke-dasharray: 5 5;
     
@@ -26,7 +27,7 @@ flowchart TD
         RawTopic[(Topic String)]:::io
     end
     
-    %% Central Hub / Brain (Like the NATS Event Bus)
+    %% Central Hub / Brain (Event Bus)
     Sup((Layer 6: Supervisor Agent\nCentral Orchestrator & Router)):::supervisor
 
     %% LAYER 1: INPUT
@@ -66,6 +67,16 @@ flowchart TD
         Cit(Citation):::l4
         OB(Outline Builder):::l4
     end
+
+    %% LAYER 4.5: QUALITY AUDIT
+    subgraph Layer45 [Layer 4.5: Quality Audit & Peer Review]
+        direction LR
+        PC(Plagiarism Checker):::l45
+        PR(Plagiarism Remediator):::l45
+        AI(AI Percentage Auditor):::l45
+        PRV(Peer Reviewer Agent):::l45
+        FQA(Format Quality Auditor):::l45
+    end
     
     %% LAYER 5: OUTPUT
     subgraph Layer5 [Layer 5: Output Generation]
@@ -83,46 +94,30 @@ flowchart TD
     end
 
     %% --- CONNECTIONS & DATA FLOW ---
-
-    %% 1. Input to L1
     RawCode --> CI
-    RawNotes --> DI
-    RawNotes --> SA
+    RawNotes --> DI & SA
     RawTopic --> QP
     
-    %% 2. Neural/Bus Connections (Supervisor monitoring everything)
     Sup <.-> DI & SA & QP & CI
     Sup <.-> CB & AD & CA & HM & BE
     Sup <.-> AA & CSA & EA & LA & GF
     Sup <.-> Conn & Crit & Cit & OB
+    Sup <.-> PC & PR & AI & PRV & FQA
     Sup <.-> WA & PDF & PPT
     
-    %% 3. Logical Flow: Layer 1 to Layer 2/3/5
-    CI -->|Preprocessed Code| CB
-    DI -->|Notes JSON| LA
-    QP -->|Subtopics| AA & CSA & EA & GF
-    SA -.->|Style Fingerprint Bypass| WA
+    CI --> CB
+    DI --> LA
+    QP --> AA & CSA & EA & GF
     
-    %% 4. Logical Flow: Layer 2 to Layer 3
-    CB -->|Function Blocks| AA
-    AD -->|Detected Algorithms| CSA
-    HM -->|Circuit Logic| EA
-    BE -->|Code Weaknesses| GF
-    CA -.->|"O(N) Complexities"| Conn
+    CB & AD & CA & HM & BE --> Conn
+    AA & CSA & EA & LA & GF --> Conn
+    Conn --> OB & Cit --> WA
     
-    %% 5. Logical Flow: Layer 3 to Layer 4
-    AA & CSA & EA & LA & GF -->|Research Data| Conn
-    GF -->|Novelty Gap| OB
-    AA -->|Raw BibTeX| Cit
+    WA --> PC & AI & PRV & FQA
+    PC & AI -.->|If Rejected: Self-Healing Loop| PR
+    PR -.->|Remediated Draft| WA
     
-    %% 6. Logical Flow: Layer 4 to Layer 5
-    Conn -->|Unified Context| WA
-    OB -->|Document Sections| WA
-    Cit -->|IEEE/ACM Refs| WA
-    WA <-->|Devil's Advocate Loop| Crit
-    
-    %% 7. Logical Flow: Layer 5 to Export
-    WA -->|Final Text Draft| PDF & PPT
+    WA --> PDF & PPT
     PDF --> OutPDF
     PPT --> OutPPT
 ```
@@ -131,37 +126,28 @@ flowchart TD
 
 ## Layer Breakdown
 
-### Layer 6: Central Orchestrator & Router (Supervisor Agent)
-- **Role**: Serves as the system brain and event bus (NATS-compatible).
-- **Function**: Continuously monitors state and routes data between layers asynchronously.
+### Layer 6: Central Orchestrator & Router (`SupervisorAgent`)
+- Monitors state and routes data between layers asynchronously.
 
-### Layer 1: Input & Parsing
-- **Code Ingestor (`CI`)**: Parses raw source code.
-- **Data Ingestor (`DI`)**: Extracts structured text and metadata from PDFs and user notes.
-- **Style Agent (`SA`)**: Captures user writing style fingerprints.
-- **Query Parser (`QP`)**: Deconstructs raw topics into targeted sub-queries.
+### Layer 1: Input & Parsing (4 Agents)
+- **Code Ingestor (`CI`)**, **Data Ingestor (`DI`)**, **Style Agent (`SA`)**, **Query Parser (`QP`)**.
 
-### Layer 2: Code Analysis
-- **Code Breaker (`CB`)**: Breaks code into function blocks.
-- **Algo Detector (`AD`)**: Identifies core algorithms and techniques.
-- **Complexity Analyzer (`CA`)**: Calculates Big-O space/time complexity.
-- **HW Mapper (`HM`)**: Maps hardware and circuit abstractions.
-- **Bug & Edge Case (`BE`)**: Spots code weaknesses and edge conditions.
+### Layer 2: Code Analysis (5 Agents)
+- **Code Breaker (`CB`)**, **Algo Detector (`AD`)**, **Complexity Analyzer (`CA`)**, **HW Mapper (`HM`)**, **Bug & Edge Case (`BE`)**.
 
-### Layer 3: Research & Grounding
-- **ArXiv Agent (`AA`)**: Fetches academic literature and BibTeX citations.
-- **CS Agent (`CSA`)**: Researches Computer Science fundamentals and state-of-the-art benchmarks.
-- **Electronics Agent (`EA`)**: Explores hardware/electronics domain knowledge.
-- **Literature Agent (`LA`)**: Analyzes notes and background material.
-- **Gap Finder (`GF`)**: Identifies novel gaps between code weaknesses and existing literature.
+### Layer 3: Research & Grounding (5 Agents)
+- **ArXiv Agent (`AA`)**, **CS Agent (`CSA`)**, **Electronics Agent (`EA`)**, **Literature Agent (`LA`)**, **Gap Finder (`GF`)**.
 
-### Layer 4: Synthesis & Structure
-- **Connector (`Conn`)**: Synthesizes unified context across research and code analysis.
-- **Outline Builder (`OB`)**: Constructs paper/presentation sections based on novelty gaps.
-- **Citation Agent (`Cit`)**: Formats BibTeX references into IEEE/ACM styles.
-- **Critic Agent (`Crit`)**: Performs iterative "Devil's Advocate" reviews on writer drafts.
+### Layer 4: Synthesis & Structure (4 Agents)
+- **Connector (`Conn`)**, **Outline Builder (`OB`)**, **Citation Agent (`Cit`)**, **Critic Agent (`Crit`)**.
 
-### Layer 5: Output Generation
-- **Writer Agent (`WA`)**: Drafts main text using styled fingerprint guidelines.
-- **PDF Agent (`PDF`)**: Compiles final manuscript into `ResearchPaper.pdf`.
-- **PPT Agent (`PPT`)**: Generates structured slides into `Presentation.pptx`.
+### Layer 4.5: Quality Audit & Peer Reviewer (5 Agents)
+- **Plagiarism Checker (`PC`)**: Similarity monitor (<15%).
+- **Plagiarism Remediator (`PR`)**: Reasoning-driven re-synthesis engine.
+- **AI Percentage Auditor (`AI`)**: AI footprint auditor (<10%).
+- **Peer Reviewer Agent (`PRV`)**: Evaluates 7 core journal submission questions.
+- **Format Quality Auditor (`FQA`)**: Grammar, terminology, and acronym auditor.
+
+### Layer 5: Output Generation (3 Agents)
+- **Writer Agent (`WA`)**, **PDF Agent (`PDF`)**, **PPT Agent (`PPT`)**.
+
