@@ -78,6 +78,9 @@ class QualityAuditResult:
     is_approved: bool = True
     feedback_reroute_target: Optional[str] = None
     rejection_reasons: List[str] = field(default_factory=list)
+    upskill_accuracy_score: float = 95.0
+    upskill_metrics: Dict[str, float] = field(default_factory=dict)
+
 
 
 @dataclass

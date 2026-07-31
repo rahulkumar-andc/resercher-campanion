@@ -182,3 +182,8 @@ flowchart TD
 ### Layer 5: Output Generation (3 Agents)
 - **Writer Agent (`WA`)**, **PDF Agent (`PDF`)**, **PPT Agent (`PPT`)**.
 
+### Hugging Face Upskill Integration Engine (`src/core/upskill_engine.py`)
+- **AgentTraceLogger**: Captures full execution traces, inputs, outputs, and timestamps across all 27 agents.
+- **SkillEvaluator**: Evaluates multi-agent accuracy across 4 academic dimensions (`academic_accuracy`, `citation_grounding`, `structural_coherence`, `reproducibility_score`) ensuring overall accuracy score >= 90.0%.
+
+

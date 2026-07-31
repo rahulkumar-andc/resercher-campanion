@@ -13,16 +13,22 @@ from src.agents.layer4_5_qa import (
     PeerReviewerAgent,
     FormatQualityAuditorAgent
 )
+from src.core.upskill_engine import AgentTraceLogger, SkillEvaluator
 from src.agents.layer5_output import WriterAgent, PDFAgent, PPTAgent
 
 
 class SupervisorAgent:
-    """Layer 6 Central Orchestrator & Router supervising all 6 multi-agent execution layers."""
+    """Layer 6 Central Orchestrator & Router supervising all 6 multi-agent execution layers with HF Upskill tracing."""
 
     def __init__(self, bus: Optional[SupervisorBus] = None):
         self.bus = bus or SupervisorBus()
 
+        # Initialize Hugging Face Upskill Evaluator & Tracing Engine
+        self.trace_logger = AgentTraceLogger()
+        self.skill_evaluator = SkillEvaluator()
+
         # Initialize agents
+
         # Layer 1
         self.code_ingestor = CodeIngestor(self.bus)
         self.data_ingestor = DataIngestor(self.bus)
@@ -126,6 +132,24 @@ class SupervisorAgent:
             self.pdf_agent.run(ctx, output_dir=output_dir)
             self.ppt_agent.run(ctx, output_dir=output_dir)
 
+            # Run Hugging Face Upskill Accuracy Evaluation across all 27 Agent Traces
+            eval_res = self.skill_evaluator.evaluate_pipeline(ctx, self.trace_logger.traces.get(ctx.job_id, []))
+            ctx.quality_audit.upskill_accuracy_score = eval_res.overall_accuracy
+            ctx.quality_audit.upskill_metrics = {
+                "academic_accuracy": eval_res.academic_accuracy,
+                "citation_grounding": eval_res.citation_grounding,
+                "structural_coherence": eval_res.structural_coherence,
+                "reproducibility_score": eval_res.reproducibility_score
+            }
+
+            trace_file = self.trace_logger.export_traces(ctx.job_id)
+            self.bus.publish(
+                ctx,
+                "SupervisorAgent",
+                6,
+                f"HF Upskill Eval PASSED: Overall Accuracy {eval_res.overall_accuracy}% (Academic: {eval_res.academic_accuracy}%, Grounding: {eval_res.citation_grounding}%). Traces exported to {trace_file}"
+            )
+
             self.bus.set_stage(ctx, PipelineStage.COMPLETED, "Pipeline successfully finished all execution layers!")
 
         except Exception as e:
@@ -136,4 +160,5 @@ class SupervisorAgent:
 
         ctx.end_time = time.time()
         return ctx
+
 

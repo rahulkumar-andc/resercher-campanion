@@ -35,11 +35,16 @@ class TestResearchCompanionPipeline(unittest.TestCase):
         supervisor = SupervisorAgent()
         completed_ctx = supervisor.execute_pipeline(ctx, output_dir=self.test_out_dir)
 
-        # Check Quality Audit & Peer Reviewer Layer
         self.assertLessEqual(completed_ctx.quality_audit.plagiarism_percentage, 15.0)
         self.assertLessEqual(completed_ctx.quality_audit.ai_writing_percentage, 10.0)
         self.assertIn("1_why_needed", completed_ctx.quality_audit.reviewer_answers)
         self.assertEqual(len(completed_ctx.quality_audit.reviewer_answers), 7)
+
+        # Check Hugging Face Upskill Evaluator Metrics
+        self.assertGreaterEqual(completed_ctx.quality_audit.upskill_accuracy_score, 90.0)
+        self.assertIn("academic_accuracy", completed_ctx.quality_audit.upskill_metrics)
+        self.assertIn("citation_grounding", completed_ctx.quality_audit.upskill_metrics)
+
 
         # Check Generated Files
         pdf_path = os.path.join(self.test_out_dir, "ResearchPaper.pdf")
