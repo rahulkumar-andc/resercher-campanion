@@ -22,43 +22,150 @@ Powered by **LangGraph** and a persistent **SQLite Checkpointer**, ARC coordinat
 
 ```mermaid
 flowchart TD
-    subgraph Layer1 [Layer 1: Input & Ingestion]
-        DI[Data Ingestor]
-        CI[Code Ingestor]
-        SA[Style Agent]
+    %% Define Styles
+    classDef supervisor fill:#8e44ad,stroke:#5b2c6f,color:white,stroke-width:4px;
+    classDef l1 fill:#3498db,stroke:#2980b9,color:white;
+    classDef l2 fill:#e74c3c,stroke:#c0392b,color:white;
+    classDef l3 fill:#2ecc71,stroke:#27ae60,color:white;
+    classDef l4 fill:#f39c12,stroke:#d68910,color:white;
+    classDef l45 fill:#d35400,stroke:#a04000,color:white;
+    classDef l5 fill:#34495e,stroke:#2c3e50,color:white;
+    classDef io fill:#95a5a6,stroke:#7f8c8d,color:black,stroke-dasharray: 5 5;
+    
+    %% Inputs (User Data)
+    subgraph IODisks [User Input Sources]
+        direction LR
+        RawCode[(Raw Source Code)]:::io
+        RawNotes[(PDFs & User Notes)]:::io
+        RawTopic[(Topic String)]:::io
     end
+    
+    %% Central Hub / Brain (Event Bus)
+    Sup((Layer 6: LangGraph Supervisor)):::supervisor
 
+    %% LAYER 1: INPUT & PARSING
+    subgraph Layer1 [Layer 1: Input & Parsing]
+        direction LR
+        GI(Git Ingestor):::l1
+        CI(Code Ingestor):::l1
+        DI(Data Ingestor):::l1
+        SA(Style Agent):::l1
+        QP(Query Parser):::l1
+    end
+    
+    %% LAYER 2: CODE ANALYSIS
     subgraph Layer2 [Layer 2: Code Analysis]
-        CB[Code Breaker]
-        AD[Algorithm Detector]
-        CA[Complexity Analyzer]
+        direction LR
+        CB(Code Breaker):::l2
+        AD(Algo Detector):::l2
+        CA(Complexity Analyzer):::l2
+        HM(HW Mapper):::l2
+        BE(Bug & Edge Case):::l2
     end
-
-    subgraph Layer3 [Layer 3: Research Grounding]
-        AA[ArXiv Live API Agent]
-        CS[CS Grounding Agent]
-        GF[Novelty Gap Finder]
+    
+    %% LAYER 3: RESEARCH & GROUNDING
+    subgraph Layer3 [Layer 3: Research & Grounding]
+        direction LR
+        WSA(Web Search):::l3
+        AA(ArXiv Agent):::l3
+        CSA(CS Agent):::l3
+        EA(Electronics Agent):::l3
+        LA(Literature Agent):::l3
+        GF(Gap Finder):::l3
     end
-
+    
+    %% LAYER 4: SYNTHESIS & STRUCTURE
     subgraph Layer4 [Layer 4: Synthesis & Structure]
-        CO[Context Connector]
-        OB[Outline Builder]
-        CR[Critic Agent / Devil's Advocate]
+        direction LR
+        Conn(Connector):::l4
+        OB(Outline Builder):::l4
+        Cit(Citation Agent):::l4
+        Crit(Critic Agent):::l4
     end
 
+    %% LAYER 4.5: QUALITY AUDIT & PEER REVIEW
+    subgraph Layer45 [Layer 4.5: Quality Audit & Peer Review]
+        direction LR
+        PC(Plagiarism Checker):::l45
+        PR(Plagiarism Remediator):::l45
+        AI(AI Percentage Auditor):::l45
+        PRV(Peer Reviewer Agent):::l45
+        FQA(Format Quality Auditor):::l45
+    end
+    
+    %% LAYER 5: OUTPUT GENERATION
     subgraph Layer5 [Layer 5: Local LLM Output]
-        WA[Writer Agent - Ollama]
-        PA[PDF Exporter]
-        PPA[PPTX Exporter]
+        direction LR
+        WA(Writer Agent - Ollama):::l5
+        PDF(PDF Exporter):::l5
+        PPT(PPT Exporter):::l5
+    end
+    
+    %% Outputs (Deliverables)
+    subgraph Deliverables [Final Export]
+        direction LR
+        OutPDF[(ResearchPaper.pdf)]:::io
+        OutPPT[(Presentation.pptx)]:::io
+        OutBIB[(References.bib)]:::io
     end
 
-    Sup((Layer 6: LangGraph Supervisor))
+    %% --- FULLY CONNECTED WIRES & DATA FLOW ---
 
-    Layer1 --> Sup
-    Sup <--> Layer2
-    Sup <--> Layer3
-    Sup <--> Layer4
-    Sup <--> Layer5
+    %% 1. Input Source Wires -> Layer 1 Agents
+    RawCode -->|"Raw Files"| CI
+    RawNotes -->|"Text & Metadata"| DI
+    RawNotes -->|"Style Samples"| SA
+    RawTopic -->|"Topic String"| QP
+
+    %% 2. Layer 1 -> Layer 2 & 3 Wires
+    CI -->|"AST Trees & Tokens"| CB & AD & CA & HM & BE
+    DI -->|"Parsed JSON Notes"| LA
+    QP -->|"Sub-queries"| AA & CSA & EA
+    SA -->|"Style Fingerprint"| WA
+
+    %% 3. Layer 2 Code Analysis Wires -> Layer 3 & 4
+    CB -->|"Function Blocks"| AA
+    AD -->|"Algorithm Types"| CSA
+    CA -->|"Big-O Metrics"| Conn
+    HM -->|"Hardware Specs"| EA
+    BE -->|"Code Weaknesses"| GF
+
+    %% 4. Layer 3 Research Wires -> Layer 4 Synthesis
+    AA -->|"BibTeX & Papers"| Cit & Conn
+    CSA -->|"CS Benchmarks"| Conn
+    EA -->|"Circuit Specs"| Conn
+    LA -->|"Background Knowledge"| Conn
+    GF -->|"Identified Research Gaps"| OB
+
+    %% 5. Layer 4 Synthesis Wires -> Layer 5 Writer
+    Conn -->|"Unified Context"| WA
+    OB -->|"Section Outlines"| WA
+    Cit -->|"IEEE/ACM References"| WA
+    WA <-->|"Draft Review & Feedback"| Crit
+
+    %% 6. Layer 5 Writer -> Layer 4.5 Quality Audit Wires
+    WA -->|"Draft Manuscript"| PC & AI & PRV & FQA
+
+    %% 7. Layer 4.5 Self-Healing Feedback Loop Wires
+    PC -.->|"Similarity > 15%"| PR
+    AI -.->|"AI Score > 10%"| PR
+    PR -.->|"Re-synthesized Text"| WA
+    PRV -.->|"Reviewer Questions"| OB
+    FQA -.->|"Grammar Fixes"| WA
+
+    %% 8. Approved QA -> Exporters & Deliverables
+    PC & AI & PRV & FQA -->|"Quality Approved"| PDF & PPT & Cit
+    PDF -->|"Rendered PDF"| OutPDF
+    PPT -->|"Rendered Deck"| OutPPT
+    Cit -->|"BibTeX Export"| OutBIB
+
+    %% 9. Layer 6 Supervisor Event Bus Monitoring (All Agents)
+    Sup <.-> GI & CI & DI & SA & QP
+    Sup <.-> CB & AD & CA & HM & BE
+    Sup <.-> WSA & AA & CSA & EA & LA & GF
+    Sup <.-> Conn & OB & Cit & Crit
+    Sup <.-> PC & PR & AI & PRV & FQA
+    Sup <.-> WA & PDF & PPT
 ```
 
 ---
