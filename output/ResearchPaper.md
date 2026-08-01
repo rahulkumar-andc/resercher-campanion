@@ -1,4 +1,4 @@
-# Technical Manuscript: Hybrid Mamba-Transformer Autonomous Systems
+# Technical Manuscript: FastAPI Web Dashboard Test
 
 **Authors:** AntiGravity Multi-Agent Research System
 **Supervisor Engine:** Layer 6 Event Bus Router
@@ -9,7 +9,7 @@
 - Key algorithmic findings
 
 ## 2. Introduction
-- Background on Hybrid Mamba-Transformer Autonomous Systems
+- Background on FastAPI Web Dashboard Test
 - Motivation and system objectives
 - Key contributions
 

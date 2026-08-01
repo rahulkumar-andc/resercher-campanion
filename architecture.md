@@ -188,7 +188,13 @@ flowchart TD
 ### Hybrid Mamba-Transformer Neural Engine (`src/core/hybrid_engine.py`)
 - **Mamba Linear Scanner (`MambaLinearScanner`)**: $O(N)$ state-space model for rapid ingestion of large codebases and multi-page PDF notes.
 - **Transformer Attention Synthesizer (`TransformerAttentionSynthesizer`)**: Dense self-attention QKV engine connecting AST nodes to ArXiv citations.
-### Local LLM & Ollama Connector Engine (`src/core/llm_client.py`)
-- **Supported Models**: `deepseek-r1:14b` / `32b` (Deep Chain-of-Thought Reasoning), `qwen2.5-coder:14b` / `32b` (AST Code Analysis & HW Mapping), `llama3.3:70b` (IEEE Paper Synthesis).
-- **Inference Router**: Local Ollama REST API (`http://localhost:11434`) with automatic fallback offline mode for unit testing.
+### Layer 0: Sandbox Runtime & Profiler (`src/agents/layer0_profiler.py`)
+- **Runtime Profiler Agent (`RPA`)**: Executes raw python code in an isolated sandbox runtime to measure true CPU execution time (`cpu_time_ms`), peak memory footprint (`peak_memory_mb`), and throughput (`throughput_ops_sec`).
+
+### SQLite Database Persistence Engine (`src/core/database.py`)
+- **Durable Job Store (`db.sqlite3`)**: Persists job statuses, agent trace histories, quality audit scores, and output file locations across system reboots.
+
+### Layer 7: Real-Time Web Dashboard & REST API (`src/web/dashboard.py`)
+- **FastAPI Control Center**: Interactive HTML5 dashboard with live 27-agent neural event log stream, job progress metrics, downloadable PDF research papers, and PPTX decks.
+
 

@@ -6,6 +6,7 @@ from enum import Enum
 
 class PipelineStage(Enum):
     IDLE = "IDLE"
+    PROFILING = "LAYER_0_PROFILING"
     INGESTION = "LAYER_1_INGESTION"
     CODE_ANALYSIS = "LAYER_2_CODE_ANALYSIS"
     RESEARCH_GROUNDING = "LAYER_3_RESEARCH_GROUNDING"
@@ -36,6 +37,10 @@ class CodeAnalysisResult:
     total_lines: int = 0
     file_count: int = 0
     language_breakdown: Dict[str, int] = field(default_factory=dict)
+    cpu_time_ms: float = 0.0
+    peak_memory_mb: float = 0.0
+    throughput_ops_sec: float = 0.0
+
 
 
 @dataclass

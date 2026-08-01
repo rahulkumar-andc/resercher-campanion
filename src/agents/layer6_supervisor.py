@@ -2,6 +2,7 @@ import time
 from typing import List, Optional
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext, PipelineStage
+from src.agents.layer0_profiler import RuntimeProfilerAgent
 from src.agents.layer1_input import CodeIngestor, DataIngestor, StyleAgent, QueryParser
 from src.agents.layer2_code import CodeBreaker, AlgoDetector, ComplexityAnalyzer, HWMapper, BugEdgeCase
 from src.agents.layer3_research import ArXivAgent, CSAgent, ElectronicsAgent, LiteratureAgent, GapFinder
@@ -29,14 +30,15 @@ class SupervisorAgent:
         self.skill_evaluator = SkillEvaluator()
         self.hybrid_engine = HybridNeuralEngine()
 
-        # Initialize agents
-
+        # Layer 0: Runtime Profiler
+        self.profiler_agent = RuntimeProfilerAgent(self.bus)
 
         # Layer 1
         self.code_ingestor = CodeIngestor(self.bus)
         self.data_ingestor = DataIngestor(self.bus)
         self.style_agent = StyleAgent(self.bus)
         self.query_parser = QueryParser(self.bus)
+
 
         # Layer 2
         self.code_breaker = CodeBreaker(self.bus)
@@ -76,8 +78,13 @@ class SupervisorAgent:
         self.bus.publish(ctx, "SupervisorAgent", 6, f"Starting pipeline execution for job: {ctx.job_id}")
 
         try:
+            # Stage 0: Sandbox Runtime & Profiling
+            self.bus.set_stage(ctx, PipelineStage.PROFILING, "Layer 0 profiling empirical execution metrics in sandbox")
+            self.profiler_agent.run(ctx)
+
             # Stage 1: Ingestion & Parsing
             self.bus.set_stage(ctx, PipelineStage.INGESTION, "Layer 1 parsing user inputs")
+
             self.code_ingestor.run(ctx)
             self.data_ingestor.run(ctx)
             self.style_agent.run(ctx)
