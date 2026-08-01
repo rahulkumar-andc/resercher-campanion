@@ -115,7 +115,6 @@ Your continuation (start immediately, no preamble):"""
 
 Topic       : {topic}
 Domain      : Computer Science / Engineering
-Keywords    : {", ".join(ctx.research.keywords) if ctx.research else 'N/A'}
 
 Key Contributions / Sub-Topics:
 {section_topics}
