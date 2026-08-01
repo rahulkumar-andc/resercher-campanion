@@ -21,38 +21,13 @@ class WriterAgent(BaseAgent):
 
         # Build context prompt for the LLM
         outline_str = "\n".join([f"- {s['section']}: " + ", ".join(s['topics']) for s in outline])
-        gaps_str = "\n".join([f"- {g}" for g in research.novelty_gaps]) if hasattr(research, 'novelty_gaps') and research.novelty_gaps else "None found"
-        algos_str = ", ".join([a['name'] for a in code.algorithms]) if code.algorithms else "N/A"
-        
-        # Deep Context Injection
         unified_context = ctx.synthesis.unified_context if hasattr(ctx.synthesis, 'unified_context') else "No deep context available."
         
-        prompt = f"""
-You are an elite academic researcher, technical writer, and domain expert. 
-Write a highly analytical, deep, and factual academic manuscript on the topic: "{topic}".
-
-Do not use conversational AI filler (e.g., "Here is the paper"). Do not use generic boilerplate. 
-Write densely packed, highly technical content that reads like a published paper in a top-tier journal.
-
-### DOCUMENT OUTLINE ###
-{outline_str}
-
-### SYSTEM UNIFIED CONTEXT (Code, Algorithms & Literature) ###
-{unified_context}
-
-### EXPECTED OUTPUT ###
-Generate the FULL Markdown content of the manuscript. 
-Include deep analysis, theoretical background, methodology (citing the function blocks), and detailed conclusions. 
-Ensure a minimum of 1500 words.
-"""
+        system_prompt = "You are an elite academic researcher and tenured professor. Write strictly in IEEE/ACM academic journal format. Be exhaustive, mathematically rigorous, and highly analytical."
         
-        system_prompt = "You are an elite academic writer synthesizing code and literature into high-quality IEEE/ACM style markdown papers."
-        
-        # Issue #1 Fix: Use powerful external API (Mistral/OpenAI compatible) instead of weak 4GB VRAM 7B model
         import requests
         import os
         
-        # Load key from .env or environment
         api_key = os.environ.get("CLOUD_LLM_API_KEY")
         if not api_key:
             try:
@@ -66,59 +41,75 @@ Ensure a minimum of 1500 words.
                 
         if not api_key:
             self.log(ctx, "CLOUD_LLM_API_KEY not found in .env. Falling back to Local LLM.", level="WARN")
-        else:
-            self.log(ctx, "Calling high-parameter Cloud LLM for academic synthesis (Bypassing 7B local limits)...")
-            
-        generated_manuscript = ""
+        
+        self.log(ctx, "Initiating DEEP MULTI-PASS ACADEMIC SYNTHESIS. Generating paper section by section for maximum depth...")
+        
+        full_manuscript = f"# {topic}\n\n"
         
         if api_key:
             try:
-                # Assuming Mistral API based on 32-char alphanumeric format, fallback compatible with standard chat/completions
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 }
-                payload = {
-                    "model": "mistral-large-latest", # Powerful model suitable for academic writing
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 4000
-                }
                 
-                resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=120)
-                
-                if resp.status_code == 200:
-                    generated_manuscript = resp.json()["choices"][0]["message"]["content"]
-                    self.log(ctx, "Cloud LLM generation successful.")
-                else:
-                    self.log(ctx, f"Cloud LLM API Error ({resp.status_code}): {resp.text}", level="WARN")
-                    raise Exception("Cloud API Failed")
+                # Iterate through each section and generate massive depth
+                for section_dict in outline:
+                    section_title = section_dict['section']
+                    section_topics = ", ".join(section_dict['topics'])
+                    self.log(ctx, f"Drafting intensive academic content for: {section_title}...")
                     
+                    section_prompt = f"""
+You are writing a top-tier academic research paper on: "{topic}".
+You are currently drafting ONLY this specific section: **{section_title}**.
+
+### SUB-TOPICS TO COVER IN THIS SECTION ###
+{section_topics}
+
+### SYSTEM UNIFIED CONTEXT (Code, Algorithms & Literature) ###
+{unified_context}
+
+### PREVIOUSLY WRITTEN SECTIONS (For flow and continuity) ###
+{full_manuscript[-2000:] if len(full_manuscript) > 2000 else full_manuscript}
+
+### INSTRUCTIONS ###
+1. Write ONLY the content for **{section_title}**. Do not write other sections.
+2. Be extremely exhaustive, theoretical, and highly technical. 
+3. If this is Methodology or Code Analysis, cite specific code metrics, time complexities (Big-O), and edge cases provided in the context.
+4. If this is Literature, cite the provided ArXiv abstracts.
+5. Write at least 800-1200 words for this section alone. Do NOT use conversational AI filler.
+"""
+                    payload = {
+                        "model": "mistral-large-latest",
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": section_prompt}
+                        ],
+                        "temperature": 0.2,
+                        "max_tokens": 4000
+                    }
+                    
+                    resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=180)
+                    
+                    if resp.status_code == 200:
+                        section_content = resp.json()["choices"][0]["message"]["content"]
+                        full_manuscript += f"\n\n## {section_title}\n\n{section_content}"
+                        self.log(ctx, f"Completed {section_title} ({len(section_content)} chars).")
+                    else:
+                        self.log(ctx, f"Cloud API Error on {section_title}: {resp.status_code}. Skipping.", level="WARN")
+                        
+                self.log(ctx, "Deep multi-pass synthesis completed successfully.")
             except Exception as e:
-                self.log(ctx, f"Falling back to Local LLM due to Cloud API error: {e}", level="WARN")
-                generated_manuscript = "" # Fall through to local LLM
-
-        # Fallback to local 7B model if Cloud LLM wasn't used or failed
-        if not generated_manuscript:
-            generated_manuscript = self.llm.generate(prompt=prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
-
-        
-        # Check if fallback happened (Ollama not connected or Timeout)
-        if "[LocalLLM Offline Fallback" in generated_manuscript or "[LLM " in generated_manuscript:
-            self.log(ctx, f"LLM Generation failed or offline: {generated_manuscript[:50]}... Generating a rich dynamic template instead...", level="WARN")
-            # Create a more rich fallback template based on the actual variables so it doesn't look totally useless
-            generated_manuscript = f"# Technical Manuscript: {topic}\n\n"
-            generated_manuscript += f"**Authors:** AntiGravity Multi-Agent Research System\n\n"
-            generated_manuscript += f"## 1. Abstract\nThis paper presents an automated investigation into **{topic}**. By combining static code profiling (analyzing {code.total_lines} lines across {code.file_count} files) with academic synthesis, we identify key structural implementations such as {algos_str}.\n\n"
-            generated_manuscript += f"## 2. Research Context and Outline\nThe following areas were synthesized:\n{outline_str}\n\n"
-            generated_manuscript += f"## 3. Findings and Novelty Gaps\nOur agents identified the following crucial research gaps requiring further theoretical exploration:\n{gaps_str}\n\n"
-            generated_manuscript += f"## 4. Conclusion\nIn conclusion, {topic} presents multiple avenues for algorithmic refinement. *(Note: Full LLM synthesis was skipped due to offline mode)*.\n\n"
+                self.log(ctx, f"Deep synthesis failed: {e}. Falling back to single-pass.", level="WARN")
+                api_key = None # Trigger fallback
+                
+        # Fallback to local single-pass
+        if not api_key:
+            fallback_prompt = f"Write a full research paper on {topic} using context:\n{unified_context}\nOutline:\n{outline_str}"
+            full_manuscript = self.llm.generate(prompt=fallback_prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
 
         # Format Final Document
-        md_content = generated_manuscript + "\n\n"
+        md_content = full_manuscript + "\n\n"
 
         # Inject DataViz Mermaid diagrams if available
         if hasattr(ctx.synthesis, 'diagrams') and ctx.synthesis.diagrams:
