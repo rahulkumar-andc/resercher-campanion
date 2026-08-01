@@ -81,12 +81,25 @@ class OutlineBuilder(BaseAgent):
         topic = ctx.raw_topic
 
         outline = [
-            {"section": "1. Abstract", "topics": ["Problem statement", "Multi-agent architecture solution", "Key algorithmic findings"]},
-            {"section": "2. Introduction", "topics": [f"Background on {topic}", "Motivation and system objectives", "Key contributions"]},
-            {"section": "3. System Architecture & Code Analysis", "topics": ["Layer 1-6 agent decomposition", "AST static code analysis findings", "Big-O space & time complexity evaluation"]},
-            {"section": "4. Literature Grounding & Novelty Gap", "topics": ["Related work survey", "Identified implementation gaps", "Theoretical comparison"]},
-            {"section": "5. Performance & Hardware Mapping", "topics": ["Resource allocation patterns", "Concurrency & throughput evaluation", "Edge case mitigation"]},
-            {"section": "6. Conclusion & Future Work", "topics": ["Summary of findings", "Impact on autonomous agent research", "Future extensions"]}
+            {"section": "1. Title", "topics": ["Proposed paper title"]},
+            {"section": "2. Authors & affiliations", "topics": ["Author details and affiliations (AntiGravity Multi-Agent Research System, etc.)"]},
+            {"section": "3. Abstract", "topics": ["Problem statement", "Multi-agent architecture solution", "Key algorithmic findings"]},
+            {"section": "4. Keywords", "topics": ["5-7 relevant keywords"]},
+            {"section": "5. Introduction", "topics": [f"Background on {topic}", "Motivation and system objectives", "Key contributions"]},
+            {"section": "6. Literature Review", "topics": ["Related work survey", "Identified implementation gaps", "Theoretical comparison"]},
+            {"section": "7. Problem Statement", "topics": ["Detailed definition of the problem", "Scope and limitations of current solutions"]},
+            {"section": "8. Proposed Method / Methodology", "topics": ["Research methodology", "Data collection and evaluation strategies"]},
+            {"section": "9. System Architecture", "topics": ["Layer 1-6 agent decomposition", "AST static code analysis findings", "High-level module interactions"]},
+            {"section": "10. Algorithm / Flowchart", "topics": ["Algorithmic logic steps", "Flowchart narrative", "Step-by-step execution details"]},
+            {"section": "11. Mathematical Model", "topics": ["Big-O space & time complexity evaluation", "Theoretical constraints", "Mathematical formalization"]},
+            {"section": "12. Experimental Setup", "topics": ["Hardware mapping", "Software environment", "Simulation parameters"]},
+            {"section": "13. Results", "topics": ["Resource allocation patterns", "Concurrency & throughput evaluation", "Edge case mitigation data", "Tabular and graphical result narratives"]},
+            {"section": "14. Discussion", "topics": ["Interpretation of results", "Comparison against Literature Review", "Implications"]},
+            {"section": "15. Conclusion", "topics": ["Summary of findings", "Final verdict"]},
+            {"section": "16. Future Work", "topics": ["Impact on autonomous agent research", "Future extensions"]},
+            {"section": "17. Acknowledgement", "topics": ["Acknowledgments to frameworks and open-source contributors"]},
+            {"section": "18. References", "topics": ["Bibliography and reference list (IEEE)"]},
+            {"section": "19. Appendix", "topics": ["Supplementary data", "Additional context or Mermaid graphs"]}
         ]
 
         ctx.synthesis.outline = outline
