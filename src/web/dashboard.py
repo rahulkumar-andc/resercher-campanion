@@ -3,8 +3,9 @@ Layer 7: Real-Time Web Dashboard & REST API Visualizer
 FastAPI server serving live multi-agent execution visualizers, SSE event logs, and job management.
 """
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
@@ -31,6 +32,48 @@ app.add_middleware(
 db = DatabaseEngine()
 supervisor = SupervisorAgent()
 active_pipeline_jobs: Dict[str, PipelineContext] = {}
+active_websockets: List[WebSocket] = []
+main_loop = None
+
+@app.on_event("startup")
+async def startup_event():
+    global main_loop
+    main_loop = asyncio.get_running_loop()
+
+async def _broadcast_log(msg: Any):
+    log_data = {
+        "agent": msg.agent_name,
+        "layer": msg.layer,
+        "content": msg.content,
+        "level": msg.level,
+        "time": msg.timestamp
+    }
+    dead = []
+    for ws in active_websockets:
+        try:
+            await ws.send_json(log_data)
+        except Exception:
+            dead.append(ws)
+    for w in dead:
+        if w in active_websockets:
+            active_websockets.remove(w)
+
+def sync_broadcast_log(msg: Any):
+    if main_loop and main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast_log(msg), main_loop)
+
+supervisor.bus.subscribe(sync_broadcast_log)
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    active_websockets.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        if websocket in active_websockets:
+            active_websockets.remove(websocket)
 
 
 def run_pipeline_async(ctx: PipelineContext):
@@ -295,6 +338,18 @@ def render_dashboard():
         </div>
     </div>
 
+    <div class="card" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 12px;">
+            <h2 style="border: none; padding: 0; margin: 0; color: #a78bfa;">🧠 Neural Network Topology (Hybrid Mamba-Transformer)</h2>
+            <div style="display:flex; gap: 8px;">
+                <span class="badge" style="background:#10b981; color:white;">Mamba Nodes</span>
+                <span class="badge" style="background:#ef4444; color:white;">Transformer Nodes</span>
+                <span class="badge" style="background:#f59e0b; color:white;">Supervisor</span>
+            </div>
+        </div>
+        <div id="d3-nn-container" style="width: 100%; height: 320px; background: #090d16; border-radius: 8px; border: 1px solid var(--border); overflow: hidden;"></div>
+    </div>
+
     <div class="grid">
         <div class="card">
             <h2>🚀 Launch Research Pipeline</h2>
@@ -324,8 +379,171 @@ def render_dashboard():
         </div>
     </div>
 
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <script>
         let currentJobId = "e2e_full_verification_job";
+
+        // --- Exact 27-Agent Neural Topology (D3.js Implementation) ---
+        function initD3() {
+            const d3Container = d3.select("#d3-nn-container");
+            const width = d3Container.node().getBoundingClientRect().width;
+            const height = 320;
+            
+            d3Container.selectAll("*").remove(); 
+            
+            const svg = d3Container.append("svg")
+                .attr("width", "100%")
+                .attr("height", height)
+                .attr("viewBox", `0 0 ${width} ${height}`)
+                .style("background", "transparent");
+            
+            const architecture = [
+                { layer: 0, name: 'L0: Profiler', agents: ['RPA'], type: 'profiler' },
+                { layer: 1, name: 'L1: Input', agents: ['GI', 'CI', 'DI', 'SA', 'QP'], type: 'mamba' },
+                { layer: 2, name: 'L2: Analysis', agents: ['CB', 'AD', 'CA', 'HM', 'BE'], type: 'transformer' },
+                { layer: 3, name: 'L3: Grounding', agents: ['WSA', 'AA', 'CSA', 'EA', 'LA', 'GF'], type: 'mamba' },
+                { layer: 4, name: 'L4: Synthesis', agents: ['Conn', 'OB', 'Cit', 'Crit'], type: 'transformer' },
+                { layer: 4.5, name: 'L4.5: Audit', agents: ['PC', 'PR', 'AI', 'PRV', 'FQA'], type: 'transformer' },
+                { layer: 5, name: 'L5: Output', agents: ['WA', 'PDF', 'PPT'], type: 'mamba' },
+                { layer: 6, name: 'L6: Supervisor', agents: ['Sup'], type: 'supervisor' }
+            ];
+            
+            let nodes = [];
+            let links = [];
+            
+            const layerSpacing = width / (architecture.length + 1);
+            const maxAgents = 6;
+            const nodeSpacing = (height - 60) / maxAgents;
+            
+            architecture.forEach((layerData, i) => {
+                const numAgents = layerData.agents.length;
+                const startY = (height - (numAgents - 1) * nodeSpacing) / 2 + 10;
+                
+                layerData.agents.forEach((agent, j) => {
+                nodes.push({
+                    id: `${layerData.layer}_${j}`,
+                    layerIndex: i,
+                    x: layerSpacing * (i + 1),
+                    y: startY + (j * nodeSpacing),
+                    label: agent,
+                    type: layerData.type
+                });
+                });
+            });
+            
+            for (let i = 0; i < architecture.length - 1; i++) {
+                const currentLayerAgents = nodes.filter(n => n.layerIndex === i);
+                const nextLayerAgents = nodes.filter(n => n.layerIndex === i + 1);
+                
+                currentLayerAgents.forEach(c => {
+                nextLayerAgents.forEach(n => {
+                    links.push({
+                    source: c,
+                    target: n,
+                    id: `${c.id}-${n.id}`
+                    });
+                });
+                });
+            }
+            
+            const defs = svg.append("defs");
+            const filter = defs.append("filter").attr("id", "glow");
+            filter.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "coloredBlur");
+            const feMerge = filter.append("feMerge");
+            feMerge.append("feMergeNode").attr("in", "coloredBlur");
+            feMerge.append("feMergeNode").attr("in", "SourceGraphic");
+            
+            const linkElements = svg.append("g")
+                .selectAll("line")
+                .data(links)
+                .join("line")
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y)
+                .attr("stroke", "rgba(148, 163, 184, 0.15)")
+                .attr("stroke-width", 1);
+            
+            const nodeElements = svg.append("g")
+                .selectAll("g")
+                .data(nodes)
+                .join("g")
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+            
+            nodeElements.append("circle")
+                .attr("r", 12)
+                .attr("fill", "#1e293b")
+                .attr("stroke", d => {
+                if (d.type === 'transformer') return '#ef4444'; 
+                if (d.type === 'mamba') return '#10b981'; 
+                if (d.type === 'supervisor') return '#f59e0b'; 
+                return '#3b82f6'; 
+                })
+                .attr("stroke-width", 2)
+                .attr("class", "node-circle");
+            
+            nodeElements.append("text")
+                .attr("y", 24)
+                .attr("text-anchor", "middle")
+                .attr("fill", "#94a3b8")
+                .style("font-size", "10px")
+                .style("font-family", "Inter")
+                .text(d => d.label);
+            
+            svg.append("g")
+                .selectAll("text")
+                .data(architecture)
+                .join("text")
+                .attr("x", (d, i) => layerSpacing * (i + 1))
+                .attr("y", 20)
+                .attr("text-anchor", "middle")
+                .attr("fill", "rgba(255, 255, 255, 0.5)")
+                .style("font-size", "11px")
+                .style("font-weight", "bold")
+                .style("font-family", "Inter")
+                .text(d => d.name);
+            
+            window.pulseNN = function() {
+                const activeNodes = d3.shuffle([...nodes]).slice(0, 4);
+                
+                svg.selectAll(".node-circle")
+                .filter(d => activeNodes.includes(d))
+                .transition().duration(200)
+                .attr("fill", "#8b5cf6")
+                .attr("stroke", "#fff")
+                .style("filter", "url(#glow)")
+                .transition().duration(800)
+                .attr("fill", "#1e293b")
+                .attr("stroke", d => {
+                    if (d.type === 'transformer') return '#ef4444';
+                    if (d.type === 'mamba') return '#10b981';
+                    if (d.type === 'supervisor') return '#f59e0b';
+                    return '#3b82f6';
+                })
+                .style("filter", null);
+
+                const activeLinks = d3.shuffle([...links]).slice(0, 10);
+                linkElements
+                .filter(d => activeLinks.includes(d))
+                .transition().duration(200)
+                .attr("stroke", "rgba(139, 92, 246, 0.8)")
+                .attr("stroke-width", 2.5)
+                .transition().duration(800)
+                .attr("stroke", "rgba(148, 163, 184, 0.15)")
+                .attr("stroke-width", 1);
+            };
+
+            // setInterval(() => {
+            //     window.pulseNN();
+            // }, 1200);
+
+            window.addEventListener('resize', () => {
+                const newWidth = d3Container.node().getBoundingClientRect().width;
+                svg.attr("viewBox", `0 0 ${newWidth} ${height}`);
+            });
+        }
+        
+        setTimeout(initD3, 100);
 
         async function startPipeline() {
             const topic = document.getElementById("topic").value;
@@ -357,18 +575,19 @@ def render_dashboard():
             document.getElementById("m-accuracy").innerText = (data.upskill_score || 94.17) + "%";
             document.getElementById("m-status").innerText = data.stage || "COMPLETED";
 
-            const logRes = await fetch("/api/jobs/" + currentJobId + "/logs");
-            const logData = await logRes.json();
-            const logBox = document.getElementById("log-box");
-            if (logData.logs && logData.logs.length > 0) {
-                logBox.innerHTML = "";
-                logData.logs.forEach(l => {
-                    const badgeClass = l.level === "WARN" ? "badge-warn" : "badge-info";
-                    logBox.innerHTML += `<div class="log-entry"><span class="badge ${badgeClass}">${l.agent}</span> ${l.content}</div>`;
-                });
-                logBox.scrollTop = logBox.scrollHeight;
-            }
+            // Live logs now handled by WebSockets
         }
+
+        // WebSockets for true real-time streaming
+        const ws = new WebSocket("ws://" + window.location.host + "/ws");
+        ws.onmessage = function(event) {
+            const l = JSON.parse(event.data);
+            const logBox = document.getElementById("log-box");
+            const badgeClass = l.level === "WARN" ? "badge-warn" : "badge-info";
+            logBox.innerHTML += `<div class="log-entry"><span class="badge ${badgeClass}">${l.agent}</span> ${l.content}</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+            if (window.pulseNN) window.pulseNN();
+        };
 
         function downloadPDF() {
             window.open("/download/pdf/" + currentJobId, "_blank");

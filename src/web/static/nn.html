@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARC Deep Neural Engine — 3D Spatial Map</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 3D Force Graph Library -->
+    <script src="https://unpkg.com/3d-force-graph"></script>
+    <script src="https://unpkg.com/three"></script>
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: #030712;
+            color: #f8fafc;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+        #3d-graph {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .overlay {
+            position: absolute;
+            top: 2rem;
+            left: 2rem;
+            z-index: 10;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.8);
+            max-width: 380px;
+        }
+        .close-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .close-btn:hover { color: #f8fafc; }
+        h1 {
+            font-size: 1.4rem;
+            background: linear-gradient(135deg, #a855f7, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            line-height: 1.5;
+            margin-bottom: 1rem;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.8rem;
+            font-size: 0.75rem;
+            color: #cbd5e1;
+        }
+        .stat-box {
+            background: rgba(0,0,0,0.5);
+            padding: 0.6rem;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .stat-value {
+            font-weight: 700;
+            color: #2ecc71;
+            font-size: 1.1rem;
+            display: block;
+            margin-bottom: 2px;
+        }
+        .controls-hint {
+            margin-top: 1.5rem;
+            font-size: 0.75rem;
+            color: #64748b;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            padding-top: 0.8rem;
+        }
+        .back-btn {
+            display: block;
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .back-btn:hover { background: rgba(59, 130, 246, 0.3); }
+        
+        .pulse-text {
+            animation: pulse-op 2s infinite alternate;
+        }
+        @keyframes pulse-op {
+            from { opacity: 0.6; }
+            to { opacity: 1; text-shadow: 0 0 10px rgba(59, 130, 246, 0.8); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="overlay" id="info-panel">
+        <button class="close-btn" onclick="document.getElementById('info-panel').style.display='none'" title="Hide Panel">✖</button>
+        <h1>ARC Deep Engine 3D</h1>
+        <p>Fully interactive WebGL neural topography. Real-time telemetry via WebSocket mapped to spatial coordinate clusters representing discrete model layers.</p>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <span class="stat-value" id="val-nodes">0</span>
+                Total Tensors Fired
+            </div>
+            <div class="stat-box">
+                <span class="stat-value pulse-text" id="val-params" style="color: #3b82f6;">Listening...</span>
+                Engine State
+            </div>
+            <div class="stat-box">
+                <span class="stat-value" id="val-ops" style="color: #a855f7;">0</span>
+                Active Agents
+            </div>
+            <div class="stat-box">
+                <span class="stat-value" id="val-cluster" style="color: #eab308;">Idle</span>
+                Active Layer
+            </div>
+        </div>
+        
+        <div class="controls-hint">
+            <strong>Controls:</strong> Left-click to Rotate | Right-click to Pan | Scroll to Zoom
+        </div>
+        
+        <a href="/" class="back-btn">← Back to Dashboard</a>
+    </div>
+
+    <div id="3d-graph"></div>
+
+    <script>
+        // Layer definitions
+        const ARC_LAYERS = [
+            { id: 0, name: "Vector Space (Ingestion)", count: 20, color: "#3b82f6" },
+            { id: 1, name: "AST Parser (Mamba State)", count: 45, color: "#8b5cf6" },
+            { id: 2, name: "Latent Reasoning (Transformer)", count: 65, color: "#d946ef" },
+            { id: 3, name: "Audit & Debate (Critic)", count: 35, color: "#ec4899" },
+            { id: 4, name: "Synthesis Output (Writer)", count: 12, color: "#2ecc71" }
+        ];
+
+        // Generate Nodes mapped to Z-planes
+        const gData = { nodes: [], links: [] };
+        
+        ARC_LAYERS.forEach(layer => {
+            for (let i = 0; i < layer.count; i++) {
+                gData.nodes.push({
+                    id: `${layer.id}_${i}`,
+                    layer: layer.id,
+                    name: layer.name,
+                    color: layer.color,
+                    val: layer.id === 0 || layer.id === 4 ? 2 : (Math.random() * 2 + 1),
+                    // Force nodes into planes along Z axis
+                    z: (layer.id * 150) - 300, 
+                    x: (Math.random() - 0.5) * 300,
+                    y: (Math.random() - 0.5) * 300
+                });
+            }
+        });
+
+        // Generate Links (Inter-layer connectivity)
+        for (let l = 0; l < ARC_LAYERS.length - 1; l++) {
+            const currentNodes = gData.nodes.filter(n => n.layer === l);
+            const nextNodes = gData.nodes.filter(n => n.layer === l + 1);
+            
+            // Connect sparse matrix
+            currentNodes.forEach(c => {
+                nextNodes.forEach(n => {
+                    if (Math.random() < 0.15) { // 15% connection chance
+                        gData.links.push({
+                            source: c.id,
+                            target: n.id,
+                            color: "rgba(255,255,255,0.05)"
+                        });
+                    }
+                });
+            });
+        }
+
+        // Initialize 3D Graph
+        const Graph = ForceGraph3D()
+            (document.getElementById('3d-graph'))
+            .graphData(gData)
+            .nodeAutoColorBy('layer')
+            .nodeColor(node => node.color)
+            .nodeRelSize(4)
+            .linkOpacity(0.15)
+            .linkColor(link => link.color)
+            .linkWidth(0.5)
+            .linkDirectionalParticles(2)
+            .linkDirectionalParticleWidth(0) // Hide particles by default
+            .linkDirectionalParticleSpeed(0.01)
+            .backgroundColor('#030712')
+            .d3Force('charge', d3.forceManyBody().strength(-20))
+            .d3Force('link', d3.forceLink().id(d => d.id).distance(40));
+
+        // Disable standard force simulation pushing nodes out of their Z-planes
+        Graph.d3Force('z', d3.forceZ().z(d => (d.layer * 150) - 300).strength(1));
+
+        // Add slow auto-rotation
+        let angle = 0;
+        setInterval(() => {
+            Graph.cameraPosition({
+                x: 800 * Math.sin(angle),
+                z: 800 * Math.cos(angle)
+            });
+            angle += Math.PI / 1500; // rotate speed
+        }, 30);
+
+
+        // --- WEBSOCKET REAL-TIME SYNC ---
+        let totalEvents = 0;
+        let activeAgents = new Set();
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+        ws.onopen = () => {
+            document.getElementById('val-params').innerText = 'Connected';
+            document.getElementById('val-params').style.color = '#2ecc71';
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            totalEvents++;
+            
+            // Update Dashboard Stats
+            if (data.sender) activeAgents.add(data.sender);
+            document.getElementById('val-ops').innerText = activeAgents.size.toString();
+            document.getElementById('val-nodes').innerText = totalEvents.toString();
+            document.getElementById('val-params').innerText = 'Executing';
+            document.getElementById('val-params').style.color = '#eab308';
+
+            // Determine Target Layer
+            let targetLayer = 0;
+            const sender = (data.sender || "").toLowerCase();
+            
+            if (sender.includes("git") || sender.includes("ingest")) targetLayer = 0;
+            else if (sender.includes("codebreaker") || sender.includes("ast")) targetLayer = 1;
+            else if (sender.includes("research") || sender.includes("analysis")) targetLayer = 2;
+            else if (sender.includes("critic") || sender.includes("audit")) targetLayer = 3;
+            else if (sender.includes("writer") || sender.includes("output")) targetLayer = 4;
+            else if (sender.includes("supervisor")) targetLayer = 2; // general mid-level
+
+            document.getElementById('val-cluster').innerText = ARC_LAYERS[targetLayer].name;
+
+            // Trigger 3D Layer Explosion/Pulse Effect
+            pulseLayer(targetLayer);
+
+            clearTimeout(window.idleTimer);
+            window.idleTimer = setTimeout(() => {
+                document.getElementById('val-params').innerText = 'Listening...';
+                document.getElementById('val-params').style.color = '#3b82f6';
+                document.getElementById('val-cluster').innerText = 'Idle';
+                activeAgents.clear();
+                document.getElementById('val-ops').innerText = '0';
+                
+                // Dim everything back
+                Graph.nodeColor(node => node.color);
+                Graph.linkDirectionalParticleWidth(0);
+            }, 3000);
+        };
+
+        function pulseLayer(layerId) {
+            // Light up nodes in the active layer
+            Graph.nodeColor(node => {
+                if (node.layer === layerId) return '#ffffff'; // Flash white
+                if (Math.abs(node.layer - layerId) === 1) return node.color; // Normal
+                return 'rgba(255,255,255,0.05)'; // Dim others
+            });
+
+            // Shoot data particles from this layer to the next
+            Graph.linkDirectionalParticleWidth(link => {
+                // link source might be object or id string
+                const sourceNode = typeof link.source === 'object' ? link.source : gData.nodes.find(n => n.id === link.source);
+                if (sourceNode && sourceNode.layer === layerId) {
+                    return 2; // Show flying particles
+                }
+                return 0;
+            });
+            
+            Graph.linkDirectionalParticleColor(() => '#ffffff');
+        }
+
+        ws.onclose = () => {
+            document.getElementById('val-params').innerText = 'Disconnected';
+            document.getElementById('val-params').style.color = '#ef4444';
+        };
+    </script>
+</body>
+</html>

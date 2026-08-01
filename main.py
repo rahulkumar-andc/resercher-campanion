@@ -46,8 +46,8 @@ def main():
     ctx = PipelineContext(
         job_id=job_id,
         raw_topic=args.topic,
-        raw_code_paths=[args.code] if os.path.exists(args.code) else [],
-        raw_notes_paths=[args.notes] if os.path.exists(args.notes) else []
+        raw_code_paths=[args.code] if os.path.exists(args.code) or args.code.startswith(('http://', 'https://', 'git@')) else [],
+        raw_notes_paths=[args.notes] if os.path.exists(args.notes) or args.notes.startswith(('http://', 'https://')) else []
     )
 
     supervisor = SupervisorAgent()

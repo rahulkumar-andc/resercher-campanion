@@ -299,31 +299,43 @@ body {
   color: white;
 }
 
-/* Live Terminal Log */
+/* Hacker Terminal Log UI */
 .terminal-card {
   margin-top: 1.5rem;
 }
 
 .terminal-window {
-  background: #090d16;
+  background: #020617; /* Even darker background */
   border-radius: 10px;
-  padding: 1rem;
+  padding: 1.5rem;
   font-family: var(--font-mono);
   font-size: 0.85rem;
-  height: 240px;
+  height: 300px;
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(0, 255, 0, 0.2);
+  box-shadow: inset 0 0 20px rgba(0, 255, 0, 0.05);
+}
+
+.terminal-window::-webkit-scrollbar {
+  width: 8px;
+}
+.terminal-window::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 0, 0.2);
+  border-radius: 4px;
 }
 
 .log-line {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.4rem;
   word-break: break-all;
+  color: #00ff41; /* Classic hacker green */
+  text-shadow: 0 0 5px rgba(0, 255, 65, 0.4);
 }
 
-.log-line.STAGE { color: #d8b4fe; font-weight: 600; }
-.log-line.INFO { color: #94a3b8; }
-.log-line.WARN { color: #fde047; }
-.log-line.ERROR { color: #f87171; font-weight: 600; }
+.log-line.STAGE { color: #8b5cf6; font-weight: 600; text-shadow: 0 0 8px rgba(139, 92, 246, 0.6); }
+.log-line.INFO { color: #00ff41; }
+.log-line.WARN { color: #eab308; text-shadow: 0 0 5px rgba(234, 179, 8, 0.4); }
+.log-line.ERROR { color: #ef4444; font-weight: 600; text-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+
 
 /* Exports Section */
 .exports-group {
@@ -360,4 +372,21 @@ body {
   align-items: center;
   justify-content: center;
   font-size: 1.2rem;
+}
+
+/* Neural Network Container */
+.nn-container {
+  width: 100%;
+  overflow: hidden;
+  background: #090d16;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+canvas#nn-canvas {
+  width: 100%;
+  height: 400px;
+  display: block;
 }

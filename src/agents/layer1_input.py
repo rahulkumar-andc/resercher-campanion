@@ -113,16 +113,50 @@ class DataIngestor(BaseAgent):
         self.log(ctx, f"Data ingestion finished. Collected {len(combined_notes)} characters of notes.")
 
 
+import json
+
 class StyleAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("StyleAgent", layer=1, bus=bus)
+        self.profile_path = os.path.expanduser("~/.arc_style_profile.json")
 
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Extracting style fingerprint from ingested notes and context...")
+        
+        fingerprint = {}
+        # Load existing profile if it exists
+        if os.path.exists(self.profile_path):
+            try:
+                with open(self.profile_path, "r", encoding="utf-8") as f:
+                    fingerprint = json.load(f)
+                self.log(ctx, "Loaded existing style profile from disk.")
+            except Exception as e:
+                self.log(ctx, f"Failed to load style profile: {e}", level="WARN")
+
+        # If we have new notes to learn from, analyze and update profile
         notes_text = ctx.research.literature_summary
-        fingerprint = StyleEngine.extract_fingerprint(notes_text)
+        if notes_text and notes_text != "No raw notes provided.":
+            new_fingerprint = StyleEngine.extract_fingerprint(notes_text)
+            
+            # Simple merge: prefer newly learned vocabulary density / length if it's more robust
+            if new_fingerprint:
+                fingerprint.update(new_fingerprint)
+                
+            # Save updated profile
+            try:
+                with open(self.profile_path, "w", encoding="utf-8") as f:
+                    json.dump(fingerprint, f, indent=2)
+                self.log(ctx, "Saved updated style profile to disk.")
+            except Exception as e:
+                self.log(ctx, f"Failed to save style profile: {e}", level="WARN")
+        else:
+            if not fingerprint:
+                # No notes and no existing profile, use default
+                fingerprint = StyleEngine.extract_fingerprint("")
+                self.log(ctx, "No documents fed for style learning. Using default academic style.")
+
         ctx.style_fingerprint.update(fingerprint)
-        self.log(ctx, f"Style fingerprint analyzed: Tone={fingerprint['academic_tone']}, Sentence Length={fingerprint['sentence_length']}, Citation={fingerprint['citation_preference']}.")
+        self.log(ctx, f"Style fingerprint analyzed: Tone={fingerprint.get('academic_tone')}, Sentence Length={fingerprint.get('sentence_length')}, Citation={fingerprint.get('citation_preference')}.")
 
 
 class QueryParser(BaseAgent):
@@ -133,15 +167,70 @@ class QueryParser(BaseAgent):
         topic = ctx.raw_topic.strip()
         self.log(ctx, f"Deconstructing raw topic: '{topic}' into targeted sub-queries...")
 
-        words = [w for w in re.findall(r'\b\w+\b', topic) if len(w) > 2]
-        base_query = " ".join(words[:4]) if words else topic
+        prompt = f"""You are an expert academic research assistant.
+Break down the following research topic into exactly 4 targeted sub-queries suitable for searching literature databases like ArXiv and Google Scholar.
+Include queries about: algorithms/complexity, architecture/optimization, hardware mapping, and state-of-the-art benchmarks.
+Return ONLY a JSON list of 4 strings. No markdown formatting, no explanations.
+Topic: {topic}"""
 
-        subtopics = [
-            f"{base_query} algorithms and complexity analysis",
-            f"{base_query} architecture and system optimization",
-            f"{base_query} hardware mapping and execution bottlenecks",
-            f"{base_query} state-of-the-art benchmarks and related work"
-        ]
+        response = self.llm.generate(prompt=prompt, system_prompt="You are a JSON-only API.", max_tokens=150, temperature=0.3)
+        
+        try:
+            # Clean up potential markdown formatting from LLM response
+            clean_json = response.strip()
+            if clean_json.startswith("```json"):
+                clean_json = clean_json[7:]
+            if clean_json.startswith("```"):
+                clean_json = clean_json[3:]
+            if clean_json.endswith("```"):
+                clean_json = clean_json[:-3]
+            
+            subtopics = json.loads(clean_json.strip())
+            if not isinstance(subtopics, list):
+                raise ValueError("Response is not a list")
+        except Exception as e:
+            self.log(ctx, f"Failed to parse LLM subqueries, falling back to heuristics ({e}).", level="WARN")
+            words = [w for w in re.findall(r'\b\w+\b', topic) if len(w) > 2]
+            base_query = " ".join(words[:4]) if words else topic
+            subtopics = [
+                f"{base_query} algorithms and complexity analysis",
+                f"{base_query} architecture and system optimization",
+                f"{base_query} hardware mapping and execution bottlenecks",
+                f"{base_query} state-of-the-art benchmarks and related work"
+            ]
 
         ctx.subtopics = subtopics
         self.log(ctx, f"Generated {len(subtopics)} research sub-queries: {subtopics}")
+
+import subprocess
+import tempfile
+
+class GitIngestor(BaseAgent):
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("GitIngestor", layer=1, bus=bus)
+
+    def run(self, ctx: PipelineContext) -> None:
+        self.log(ctx, "Checking for Git repository URLs in topic or inputs...")
+        
+        urls = re.findall(r'https?://(?:www\.)?(?:github\.com|gitlab\.com)/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', ctx.raw_topic)
+        
+        code_urls = [p for p in ctx.raw_code_paths if p.startswith(('http://', 'https://', 'git@'))]
+        urls.extend(code_urls)
+        ctx.raw_code_paths = [p for p in ctx.raw_code_paths if p not in code_urls]
+        
+        if not urls:
+            self.log(ctx, "No Git repository URLs found to ingest.")
+            return
+
+        for url in set(urls):
+            self.log(ctx, f"Found Git repository URL: {url}. Cloning...")
+            try:
+                temp_dir = tempfile.mkdtemp(prefix="git_ingest_")
+                result = subprocess.run(["git", "clone", "--depth", "1", url, temp_dir], capture_output=True, text=True)
+                if result.returncode == 0:
+                    self.log(ctx, f"Successfully cloned {url} to {temp_dir}")
+                    ctx.raw_code_paths.append(temp_dir)
+                else:
+                    self.log(ctx, f"Failed to clone {url}: {result.stderr}", level="ERROR")
+            except Exception as e:
+                self.log(ctx, f"Error during git clone: {e}", level="ERROR")

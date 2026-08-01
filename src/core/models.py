@@ -53,6 +53,7 @@ class CitationItem:
     abstract: str
     url: str
     bibtex: str
+    full_text: Optional[str] = None
 
 
 @dataclass

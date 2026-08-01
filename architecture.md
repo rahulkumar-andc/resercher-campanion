@@ -33,6 +33,7 @@ flowchart TD
     %% LAYER 1: INPUT & PARSING
     subgraph Layer1 [Layer 1: Input & Parsing]
         direction LR
+        GI(Git Ingestor):::l1
         CI(Code Ingestor):::l1
         DI(Data Ingestor):::l1
         SA(Style Agent):::l1
@@ -52,6 +53,7 @@ flowchart TD
     %% LAYER 3: RESEARCH & GROUNDING
     subgraph Layer3 [Layer 3: Research & Grounding]
         direction LR
+        WSA(Web Search):::l3
         AA(ArXiv Agent):::l3
         CSA(CS Agent):::l3
         EA(Electronics Agent):::l3
@@ -145,9 +147,9 @@ flowchart TD
     Cit -->|"BibTeX Export"| OutBIB
 
     %% 9. Layer 6 Supervisor Event Bus Monitoring (All Agents)
-    Sup <.-> CI & DI & SA & QP
+    Sup <.-> GI & CI & DI & SA & QP
     Sup <.-> CB & AD & CA & HM & BE
-    Sup <.-> AA & CSA & EA & LA & GF
+    Sup <.-> WSA & AA & CSA & EA & LA & GF
     Sup <.-> Conn & OB & Cit & Crit
     Sup <.-> PC & PR & AI & PRV & FQA
     Sup <.-> WA & PDF & PPT
@@ -157,17 +159,22 @@ flowchart TD
 
 ## Layer Breakdown
 
-### Layer 6: Central Orchestrator & Router (`SupervisorAgent`)
-- Monitors state and routes data between layers asynchronously.
+### Layer 6: LangGraph Neural Orchestrator (`SupervisorAgent`)
+- **StateGraph & MemorySaver**: Manages the overarching `ResearchState` utilizing LangGraph. Enables thread-level checkpointing for fault-tolerance, dynamic conditional routing (self-healing), and Human-in-the-Loop (HITL) pause-resume execution.
+- **Asynchronous Execution**: Executes Layer 2 and Layer 3 research agents simultaneously via `asyncio.gather` for maximum throughput.
 
-### Layer 1: Input & Parsing (4 Agents)
-- **Code Ingestor (`CI`)**, **Data Ingestor (`DI`)**, **Style Agent (`SA`)**, **Query Parser (`QP`)**.
+### Layer 1: Input & Parsing (5 Agents)
+- **Git Ingestor (`GI`)**, **Code Ingestor (`CI`)**, **Data Ingestor (`DI`)**, **Query Parser (`QP`)**.
+- **Style Agent (`SA`)**: Learns and persists the user's exact writing style and tone into a JSON fingerprint (`~/.arc_style_profile.json`), ensuring consistent, non-AI-like tone across sessions.
 
 ### Layer 2: Code Analysis (5 Agents)
-- **Code Breaker (`CB`)**, **Algo Detector (`AD`)**, **Complexity Analyzer (`CA`)**, **HW Mapper (`HM`)**, **Bug & Edge Case (`BE`)**.
+- **Code Breaker (`CB`)**: Deconstructs raw files into an AST-based Call Graph and embeds every function snippet into a **Local ChromaDB Vector Store** (`~/.arc_code_chroma`). This creates a Graph RAG mapping, preventing context loss, reducing LLM token costs, and dramatically accelerating code understanding.
+- **Algo Detector (`AD`)**, **Complexity Analyzer (`CA`)**, **HW Mapper (`HM`)**, **Bug & Edge Case (`BE`)**.
 
-### Layer 3: Research & Grounding (5 Agents)
-- **ArXiv Agent (`AA`)**, **CS Agent (`CSA`)**, **Electronics Agent (`EA`)**, **Literature Agent (`LA`)**, **Gap Finder (`GF`)**.
+### Layer 3: Research & Grounding (6 Agents)
+- **Web Search Agent (`WSA`)**: Live web intelligence utilizing DuckDuckGo (`ddgs`) without requiring API keys.
+- **ArXiv Agent (`AA`)**: Fetches full-text PDFs using PyMuPDF and utilizes a **ChromaDB Semantic Vector Cache** (`~/.arc_arxiv_chroma`) to instantly bypass redundant API calls based on cosine similarity of search vectors.
+- **CS Agent (`CSA`)**, **Electronics Agent (`EA`)**, **Literature Agent (`LA`)**, **Gap Finder (`GF`)**.
 
 ### Layer 4: Synthesis & Structure (4 Agents)
 - **Connector (`Conn`)**, **Outline Builder (`OB`)**, **Citation Agent (`Cit`)**, **Critic Agent (`Crit`)**.
@@ -185,6 +192,13 @@ flowchart TD
 ### Hugging Face Upskill Integration Engine (`src/core/upskill_engine.py`)
 - **AgentTraceLogger**: Captures full execution traces, inputs, outputs, and timestamps across all 27 agents.
 - **SkillEvaluator**: Evaluates multi-agent accuracy across 4 academic dimensions (`academic_accuracy`, `citation_grounding`, `structural_coherence`, `reproducibility_score`) ensuring overall accuracy score >= 90.0%.
+
+### Local LLM Engine & Ollama Connector (`src/core/llm_client.py`)
+- **Privacy-First Offline Execution**: Full inference stack runs locally without relying on external cloud APIs, ensuring absolute privacy for proprietary codebases.
+- **Dual-Model Specialization**:
+  - **DeepSeek-R1 (Reasoning)**: Highly optimized for logical deduction, algorithmic complexity analysis, and multi-step synthesis.
+  - **Qwen2.5-Coder (Coding)**: Specializes in AST parsing, bug detection, and semantic code context understanding.
+- **Hardware Optimization**: Default parameters tuned to 7B models to comfortably fit within 4GB VRAM hardware profiles.
 ### Hybrid Mamba-Transformer Neural Engine (`src/core/hybrid_engine.py`)
 - **Mamba Linear Scanner (`MambaLinearScanner`)**: $O(N)$ state-space model for rapid ingestion of large codebases and multi-page PDF notes.
 - **Transformer Attention Synthesizer (`TransformerAttentionSynthesizer`)**: Dense self-attention QKV engine connecting AST nodes to ArXiv citations.

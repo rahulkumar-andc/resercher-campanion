@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Artifacts Vault - Autonomous Research Companion</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    .vault-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+    .vault-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.5rem;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .vault-card:hover {
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(52, 152, 219, 0.2);
+    }
+    .vault-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .vault-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+    }
+    .icon-pdf {
+      background: rgba(231, 76, 60, 0.2);
+      color: #e74c3c;
+    }
+    .icon-pptx {
+      background: rgba(243, 156, 18, 0.2);
+      color: #f39c12;
+    }
+    .vault-info {
+      flex: 1;
+      overflow: hidden;
+    }
+    .vault-filename {
+      font-weight: 600;
+      color: var(--text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.95rem;
+    }
+    .vault-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+    .vault-actions {
+      margin-top: auto;
+    }
+    .btn-download {
+      display: inline-block;
+      width: 100%;
+      text-align: center;
+      padding: 0.6rem;
+      background: rgba(52, 152, 219, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(52, 152, 219, 0.3);
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+    .btn-download:hover {
+      background: rgba(52, 152, 219, 0.3);
+      color: #fff;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: var(--text-muted);
+    }
+    .nav-links {
+        margin-top: 1rem;
+        display: flex;
+        gap: 1rem;
+    }
+    .nav-links a {
+        color: var(--accent-blue);
+        text-decoration: none;
+        font-size: 0.9rem;
+    }
+    .nav-links a:hover {
+        text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="app-header">
+      <div class="logo-group">
+        <div class="logo-icon" style="background: linear-gradient(135deg, #f39c12, #e74c3c); box-shadow: 0 0 20px rgba(231, 76, 60, 0.4);">VA</div>
+        <div class="title-area">
+          <h1>Artifacts Vault</h1>
+          <p>Persistent storage for generated research papers and presentations</p>
+          <div class="nav-links">
+            <a href="/">← Back to Dashboard</a>
+            <a href="/nn">3D Neural Engine</a>
+          </div>
+        </div>
+      </div>
+      <div class="badge-status" style="border-color: #e74c3c; color: #fca5a5; background: rgba(231, 76, 60, 0.2);">
+        <span class="pulse-dot" style="background-color: #fca5a5; box-shadow: 0 0 10px #fca5a5;"></span>
+        <span>Storage Active</span>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Generated Artifacts History</h2>
+        <button class="btn-secondary" onclick="loadArtifacts()">↻ Refresh</button>
+      </div>
+      
+      <div id="vault-container" class="vault-grid">
+        <!-- Artifacts populated via JS -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function formatBytes(bytes, decimals = 2) {
+      if (!+bytes) return '0 Bytes';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+    }
+
+    async function loadArtifacts() {
+      const container = document.getElementById('vault-container');
+      container.innerHTML = '<div class="empty-state">Loading artifacts...</div>';
+      
+      try {
+        const response = await fetch('/api/vault');
+        const data = await response.json();
+        
+        if (!data.artifacts || data.artifacts.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+              <div style="font-size: 3rem; margin-bottom: 1rem;">📭</div>
+              <h3>Vault is Empty</h3>
+              <p>No research artifacts have been generated yet.</p>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = '';
+        data.artifacts.forEach(item => {
+          const isPdf = item.filename.endsWith('.pdf');
+          const iconClass = isPdf ? 'icon-pdf' : 'icon-pptx';
+          const iconSymbol = isPdf ? '📄' : '📊';
+          const date = new Date(item.created_at * 1000).toLocaleString();
+          
+          container.innerHTML += `
+            <div class="vault-card">
+              <div class="vault-header">
+                <div class="vault-icon ${iconClass}">${iconSymbol}</div>
+                <div class="vault-info">
+                  <div class="vault-filename" title="${item.filename}">${item.filename}</div>
+                  <div class="vault-meta">${formatBytes(item.size)} • ${date}</div>
+                </div>
+              </div>
+              <div class="vault-actions">
+                <a href="/api/download/file/${encodeURIComponent(item.filename)}" class="btn-download" target="_blank">
+                  Download File
+                </a>
+              </div>
+            </div>
+          `;
+        });
+      } catch (err) {
+        console.error(err);
+        container.innerHTML = '<div class="empty-state" style="color:#f87171;">Failed to load artifacts. Server may be unreachable.</div>';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadArtifacts);
+  </script>
+</body>
+</html>

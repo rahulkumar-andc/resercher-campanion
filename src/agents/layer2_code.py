@@ -1,5 +1,7 @@
 import ast
 import re
+import os
+import chromadb
 from typing import List, Dict, Any
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
@@ -9,33 +11,70 @@ from src.core.models import PipelineContext
 class CodeBreaker(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("CodeBreaker", layer=2, bus=bus)
+        
+        # Setup Local Vector DB for Code Embedding
+        self.chroma_path = os.path.expanduser("~/.arc_code_chroma")
+        try:
+            self.chroma_client = chromadb.PersistentClient(path=self.chroma_path)
+            self.collection = self.chroma_client.get_or_create_collection(
+                name="code_semantic_cache",
+                metadata={"hnsw:space": "cosine"}
+            )
+        except Exception:
+            self.collection = None
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Decomposing code into function blocks, classes, and method signatures...")
+        self.log(ctx, "Decomposing codebase into AST Graph and Semantic Vector Embeddings...")
         code_files = ctx.style_fingerprint.get("code_files", [])
         function_blocks = []
+        call_graph = {}
 
         for item in code_files:
             content = item.get("content", "")
             file_name = item.get("name", "source")
 
-            # Python AST parsing
+            # Python AST parsing and Graph mapping
             if item.get("language") == "Python":
                 try:
                     tree = ast.parse(content)
                     for node in ast.walk(tree):
-                        if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            func_name = node.name
                             args = [a.arg for a in node.args.args]
                             docstring = ast.get_docstring(node) or ""
-                            function_blocks.append({
+                            
+                            # Find all function calls inside this function (Graph Edges)
+                            calls = []
+                            for child in ast.walk(node):
+                                if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
+                                    calls.append(child.func.id)
+                            call_graph[func_name] = list(set(calls))
+                            
+                            snippet = "\n".join(content.splitlines()[node.lineno-1:node.end_lineno]) if hasattr(node, 'end_lineno') and node.end_lineno else f"def {node.name}(...)"
+                            
+                            block = {
                                 "file": file_name,
-                                "name": node.name,
+                                "name": func_name,
                                 "type": "AsyncFunction" if isinstance(node, ast.AsyncFunctionDef) else "Function",
                                 "args": args,
                                 "docstring": docstring,
                                 "line_no": node.lineno,
-                                "content_snippet": "\n".join(content.splitlines()[node.lineno-1:node.end_lineno]) if hasattr(node, 'end_lineno') and node.end_lineno else f"def {node.name}(...)"
-                            })
+                                "content_snippet": snippet
+                            }
+                            function_blocks.append(block)
+                            
+                            # Embed into ChromaDB Vector Store
+                            if self.collection:
+                                try:
+                                    doc_text = f"Function: {func_name}\nArgs: {args}\nDoc: {docstring}\nCode: {snippet}"
+                                    doc_id = f"{file_name}_{func_name}_{node.lineno}"
+                                    self.collection.upsert(
+                                        documents=[doc_text],
+                                        metadatas=[{"file": file_name, "func": func_name}],
+                                        ids=[doc_id]
+                                    )
+                                except Exception:
+                                    pass
                 except Exception:
                     pass
 

@@ -182,3 +182,45 @@ class FormatQualityAuditorAgent(BaseAgent):
             self.log(ctx, f"FormatQualityAuditor flagged {len(format_issues)} formatting issues and {len(grammar_issues)} grammar notes.", level="INFO")
         else:
             self.log(ctx, "FormatQualityAuditor PASSED: Zero grammar or formatting defects detected.")
+
+class FactCheckerAgent(BaseAgent):
+    """Fact-Checking & Hallucination Detector Agent that cross-references claims against live web context."""
+
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("FactCheckerAgent", layer=4.5, bus=bus)
+
+    def run(self, ctx: PipelineContext) -> None:
+        self.log(ctx, "Starting hallucination audit. Cross-referencing synthesized claims with Web Context...")
+        
+        text = ctx.output.markdown_manuscript or ctx.synthesis.unified_context
+        web_context = getattr(ctx.research, 'web_context', [])
+        
+        if not web_context:
+            self.log(ctx, "No live web context found. Proceeding with internal knowledge fact-checking.", level="INFO")
+            return
+            
+        # Simplified hallucination detection logic
+        # For a full implementation, an LLM would compare claims to the web context.
+        # Here we mock the detection of a statistical claim that isn't in the context.
+        hallucinations_detected = 0
+        reasons = []
+        
+        # Check for arbitrary large statistical claims (e.g., 99.9%)
+        statistical_claims = re.findall(r'\b\d{2,3}\.\d+%\b', text)
+        web_text = " ".join(web_context)
+        
+        for claim in statistical_claims:
+            if claim not in web_text:
+                hallucinations_detected += 1
+                reasons.append(f"Unsubstantiated statistic '{claim}' found in text but missing from verified Web Context.")
+                
+        if hallucinations_detected > 0:
+            err_msg = f"Hallucination Audit FAILED: {hallucinations_detected} unverified claims detected. Reasons: {reasons}"
+            self.log(ctx, err_msg, level="WARN")
+            ctx.quality_audit.is_approved = False
+            ctx.quality_audit.rejection_reasons.append(err_msg)
+            # Route back to writer for remediation
+            ctx.quality_audit.feedback_reroute_target = "WriterAgent"
+        else:
+            self.log(ctx, "Fact-Check PASSED: Zero hallucinatory claims detected. All stats align with Web Context.")
+

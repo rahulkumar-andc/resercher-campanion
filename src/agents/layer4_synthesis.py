@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext
+import chromadb
 
 
 class Connector(BaseAgent):
@@ -10,6 +11,29 @@ class Connector(BaseAgent):
 
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Synthesizing unified context graph from Layer 2 (Code Analysis) and Layer 3 (Research)...")
+        
+        # Integrating ChromaDB Vector Store to prevent context bleeding
+        try:
+            chroma_client = chromadb.Client()
+            collection = chroma_client.create_collection(name="synthesis_context")
+            documents = []
+            if ctx.research.arxiv_papers:
+                documents.extend([p.abstract for p in ctx.research.arxiv_papers])
+            if ctx.code_analysis.function_blocks:
+                documents.extend([
+                    block.get("content_snippet", str(block)) if isinstance(block, dict) else str(block) 
+                    for block in ctx.code_analysis.function_blocks
+                ])
+                
+            if documents:
+                collection.add(
+                    documents=documents,
+                    ids=[str(i) for i in range(len(documents))]
+                )
+                self.log(ctx, f"Stored {len(documents)} context blocks in local ChromaDB Vector Store.")
+        except Exception as e:
+            self.log(ctx, f"Vector Store init warning: {e}", level="WARN")
+
         code = ctx.code_analysis
         research = ctx.research
 

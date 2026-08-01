@@ -41,7 +41,12 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Upload Source Code Files (.py, .js, .cpp, .rs, etc.)</label>
+            <label class="form-label" for="repo-url-input">GitHub / GitLab Repository URL (Optional)</label>
+            <input type="url" id="repo-url-input" class="form-input" placeholder="e.g. https://github.com/tiangolo/fastapi">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">OR Upload Source Code Files (.py, .js, .cpp, .rs, etc.)</label>
             <div class="file-dropzone" onclick="document.getElementById('code-input').click()">
               <p id="code-file-label">Click or drop source code files here</p>
               <input type="file" id="code-input" class="file-input" multiple>
@@ -113,7 +118,7 @@
 
         <!-- Downloads & Deliverables -->
         <div class="exports-group">
-          <a href="/api/download/pdf" class="download-card" id="btn-dl-pdf" target="_blank">
+          <a href="/api/download/pdf" class="download-card" id="btn-dl-pdf" target="_blank" style="pointer-events:none; opacity:0.5;">
             <div class="download-icon">📄</div>
             <div>
               <div style="font-weight:600; font-size:0.9rem;">ResearchPaper.pdf</div>
@@ -121,11 +126,19 @@
             </div>
           </a>
 
-          <a href="/api/download/pptx" class="download-card" id="btn-dl-pptx" target="_blank">
+          <a href="/api/download/pptx" class="download-card" id="btn-dl-pptx" target="_blank" style="pointer-events:none; opacity:0.5;">
             <div class="download-icon">📊</div>
             <div>
               <div style="font-weight:600; font-size:0.9rem;">Presentation.pptx</div>
               <div style="font-size:0.75rem; color:var(--text-muted);">Widescreen Slide Deck</div>
+            </div>
+          </a>
+          
+          <a href="/vault" class="download-card" style="grid-column: 1 / -1; background: rgba(52, 152, 219, 0.1); border-color: rgba(52, 152, 219, 0.3);">
+            <div class="download-icon" style="background: rgba(52, 152, 219, 0.2); color: #3498db;">🗄️</div>
+            <div>
+              <div style="font-weight:600; font-size:0.9rem; color:#60a5fa;">Open Artifacts Vault</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">View and download past generated research papers</div>
             </div>
           </a>
         </div>
@@ -145,8 +158,22 @@
       </div>
     </div>
 
+    <!-- Live Neural Network Visualization -->
+    <div class="card terminal-card">
+      <div class="card-header">
+        <h2 class="card-title">4. Neural Network Live Topology</h2>
+        <div class="badge-status">
+          <span class="pulse-dot"></span>
+          <span>Live Update</span>
+        </div>
+      </div>
+      <div class="nn-container" id="d3-nn-container" style="width: 100%; height: 400px; overflow: hidden; background: transparent; border-radius: 8px;">
+      </div>
+    </div>
+
   </div>
 
+  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
