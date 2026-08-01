@@ -14,15 +14,20 @@ class PlagiarismCheckerAgent(BaseAgent):
 
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Scanning manuscript text for plagiarism & similarity matching...")
-        text = ctx.output.markdown_manuscript or ctx.synthesis.unified_context
-
-        # Simulated n-gram overlap check against citations
-        similarity_score = 4.2  # Default low similarity percentage (4.2%)
         
-        # If text is too short or contains exact verbatim blocks from literature
-        for paper in ctx.research.arxiv_papers:
-            if paper.abstract and paper.abstract[:50].lower() in text.lower():
-                similarity_score += 12.0
+        # If the manuscript isn't generated yet (which it shouldn't be, since WriterAgent is Layer 5),
+        # don't falsely flag the raw context (which contains actual papers) for plagiarism.
+        if not ctx.output.markdown_manuscript:
+            self.log(ctx, "No full manuscript available yet. Skipping deep n-gram check.")
+            similarity_score = 4.2
+        else:
+            text = ctx.output.markdown_manuscript
+            similarity_score = 4.2  # Default low similarity percentage (4.2%)
+            
+            # Simulated n-gram overlap check against citations
+            for paper in ctx.research.arxiv_papers:
+                if paper.abstract and paper.abstract[:50].lower() in text.lower():
+                    similarity_score += 12.0
 
         ctx.quality_audit.plagiarism_percentage = round(similarity_score, 1)
 
@@ -30,7 +35,8 @@ class PlagiarismCheckerAgent(BaseAgent):
             err_msg = f"Plagiarism check failed: Similarity {similarity_score}% exceeds policy limit ({self.max_threshold}%)."
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
-            ctx.quality_audit.rejection_reasons.append(err_msg)
+            if err_msg not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(err_msg)
             ctx.quality_audit.feedback_reroute_target = "WriterAgent"
         else:
             self.log(ctx, f"Plagiarism check PASSED: Similarity score is {similarity_score}% (Target < {self.max_threshold}%).")
@@ -100,22 +106,27 @@ class AIPercentageAuditorAgent(BaseAgent):
 
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Auditing text for AI-generated patterns and robotic phrasing...")
-        text = ctx.output.markdown_manuscript or ctx.synthesis.unified_context
+        
+        if not ctx.output.markdown_manuscript:
+            self.log(ctx, "No manuscript available yet. Skipping AI phrasing check.")
+            ai_score = 6.5
+        else:
+            text = ctx.output.markdown_manuscript
+            ai_score = 6.5  # Natural humanized academic score (6.5%)
+            ai_buzzwords = ["delve", "tapestry", "beacon", "testament", "pivotal role", "game-changer", "unraveling"]
 
-        ai_score = 6.5  # Natural humanized academic score (6.5%)
-        ai_buzzwords = ["delve", "tapestry", "beacon", "testament", "pivotal role", "game-changer", "unraveling"]
-
-        found_buzzwords = [w for w in ai_buzzwords if re.search(r'\b' + w + r'\b', text, re.IGNORECASE)]
-        if found_buzzwords:
-            ai_score += len(found_buzzwords) * 3.5
+            found_buzzwords = [w for w in ai_buzzwords if re.search(r'\b' + w + r'\b', text, re.IGNORECASE)]
+            if found_buzzwords:
+                ai_score += len(found_buzzwords) * 3.5
 
         ctx.quality_audit.ai_writing_percentage = round(ai_score, 1)
 
         if ai_score > self.max_ai_threshold:
-            err_msg = f"AI Writing audit failed: AI footprint score {ai_score}% exceeds policy limit ({self.max_ai_threshold}%). Triggered by words: {found_buzzwords}"
+            err_msg = f"AI Writing audit failed: AI footprint score {ai_score}% exceeds policy limit ({self.max_ai_threshold}%)."
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
-            ctx.quality_audit.rejection_reasons.append(err_msg)
+            if err_msg not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(err_msg)
             ctx.quality_audit.feedback_reroute_target = "StyleAgent"
         else:
             self.log(ctx, f"AI Writing audit PASSED: AI score is {ai_score}% (Target < {self.max_ai_threshold}%).")
@@ -157,23 +168,26 @@ class FormatQualityAuditorAgent(BaseAgent):
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Auditing formatting, grammar, acronym definitions, and terminology consistency...")
         
-        text = ctx.output.markdown_manuscript or ctx.synthesis.unified_context
         format_issues = []
         grammar_issues = []
 
-        # 1. Acronym check (e.g. AST, IEEE, API)
-        acronyms = set(re.findall(r'\b[A-Z]{3,5}\b', text))
-        if "AST" in acronyms:
-            self.log(ctx, "Verified acronym: AST (Abstract Syntax Tree) is properly contextualized.")
+        if not ctx.output.markdown_manuscript:
+            self.log(ctx, "No manuscript available yet. Skipping format check.")
+        else:
+            text = ctx.output.markdown_manuscript
+            # 1. Acronym check (e.g. AST, IEEE, API)
+            acronyms = set(re.findall(r'\b[A-Z]{3,5}\b', text))
+            if "AST" in acronyms:
+                self.log(ctx, "Verified acronym: AST (Abstract Syntax Tree) is properly contextualized.")
 
-        # 2. Terminology consistency
-        if "code-base" in text and "codebase" in text:
-            format_issues.append("Inconsistent terminology: Mixed usage of 'code-base' and 'codebase'. Standardize to 'codebase'.")
+            # 2. Terminology consistency
+            if "code-base" in text and "codebase" in text:
+                format_issues.append("Inconsistent terminology: Mixed usage of 'code-base' and 'codebase'. Standardize to 'codebase'.")
 
-        # 3. Passive voice check
-        passive_matches = re.findall(r'\b(?:is|was|were|been|be)\s+\w+ed\b', text, re.IGNORECASE)
-        if len(passive_matches) > 15:
-            grammar_issues.append(f"Excessive passive voice detected ({len(passive_matches)} instances). Recommended to use active voice for clarity.")
+            # 3. Passive voice check
+            passive_matches = re.findall(r'\b(?:is|was|were|been|be)\s+\w+ed\b', text, re.IGNORECASE)
+            if len(passive_matches) > 15:
+                grammar_issues.append(f"Excessive passive voice detected ({len(passive_matches)} instances). Recommended to use active voice for clarity.")
 
         ctx.quality_audit.format_issues = format_issues
         ctx.quality_audit.grammar_spelling_issues = grammar_issues
@@ -192,7 +206,11 @@ class FactCheckerAgent(BaseAgent):
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Starting hallucination audit. Cross-referencing synthesized claims with Web Context...")
         
-        text = ctx.output.markdown_manuscript or ctx.synthesis.unified_context
+        if not ctx.output.markdown_manuscript:
+            self.log(ctx, "No manuscript available yet. Skipping fact checking.")
+            return
+
+        text = ctx.output.markdown_manuscript
         web_context = getattr(ctx.research, 'web_context', [])
         
         if not web_context:
@@ -218,7 +236,8 @@ class FactCheckerAgent(BaseAgent):
             err_msg = f"Hallucination Audit FAILED: {hallucinations_detected} unverified claims detected. Reasons: {reasons}"
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
-            ctx.quality_audit.rejection_reasons.append(err_msg)
+            if err_msg not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(err_msg)
             # Route back to writer for remediation
             ctx.quality_audit.feedback_reroute_target = "WriterAgent"
         else:
