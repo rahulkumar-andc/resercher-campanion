@@ -16,9 +16,10 @@ class LocalLLMClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        default_model: str = "deepseek-r1:14b",
-        fallback_model: str = "qwen2.5-coder:14b",
+        default_model: str = "deepseek-r1:7b",
+        fallback_model: str = "qwen2.5-coder:7b",
         timeout: int = 30
+
     ):
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
