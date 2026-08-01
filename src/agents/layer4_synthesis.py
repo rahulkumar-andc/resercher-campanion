@@ -37,18 +37,39 @@ class Connector(BaseAgent):
         code = ctx.code_analysis
         research = ctx.research
 
+        # Deep Context Generation (Resolves Telephone Game Context Loss)
+        # 1. Gather all Paper Abstracts
+        abstracts_str = "\n\n".join([f"Title: {p.title}\nAuthors: {', '.join(p.authors)}\nAbstract: {p.abstract}" for p in research.arxiv_papers]) if research.arxiv_papers else "No papers retrieved."
+        
+        # 2. Gather Function Blocks and Edge Cases
+        functions_str = "\n".join([str(b) for b in code.function_blocks[:5]]) if code.function_blocks else "No function blocks extracted."
+        edge_cases_str = "\n".join(code.edge_cases) if hasattr(code, 'edge_cases') and code.edge_cases else "None identified."
+        hw_mapping_str = str(code.hardware_mapping) if hasattr(code, 'hardware_mapping') else "Generic CPU"
+
         unified = f"""
-# System Context & Research Grounding
-- **Topic**: {ctx.raw_topic}
-- **Ingested Source Code**: {code.file_count} files, {code.total_lines} lines ({', '.join(code.language_breakdown.keys())})
-- **Detected Algorithmic Techniques**: {', '.join([a['name'] for a in code.algorithms])}
+# SYSTEM CONTEXT & DEEP RESEARCH GROUNDING
+**Topic**: {ctx.raw_topic}
+
+## 1. SOURCE CODE ANALYSIS
+- **Metrics**: {code.file_count} files, {code.total_lines} lines ({', '.join(code.language_breakdown.keys()) if hasattr(code, 'language_breakdown') else 'N/A'})
+- **Algorithms Detected**: {', '.join([a['name'] for a in code.algorithms]) if code.algorithms else 'None'}
+- **Hardware Profile**: {hw_mapping_str}
+- **Critical Edge Cases & Weaknesses**:
+{edge_cases_str}
+
+### Core Function Blocks (Sample)
+{functions_str}
+
+## 2. THEORETICAL RESEARCH & LITERATURE
 - **Primary Novelty Gaps**:
-{chr(10).join(['  * ' + g for g in research.novelty_gaps])}
-- **Key References**: {len(research.arxiv_papers)} papers fetched ({', '.join([p.key for p in research.arxiv_papers])})
+{chr(10).join(['  * ' + g for g in research.novelty_gaps]) if research.novelty_gaps else 'None found'}
+
+### Academic Grounding (Key Abstracts)
+{abstracts_str}
 """.strip()
 
         ctx.synthesis.unified_context = unified
-        self.log(ctx, "Connector generated unified multi-layer context synthesis.")
+        self.log(ctx, "Connector generated DEEP unified context, preserving full data fidelity.")
 
 
 class OutlineBuilder(BaseAgent):

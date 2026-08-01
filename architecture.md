@@ -198,7 +198,7 @@ flowchart TD
 - **Dual-Model Specialization**:
   - **DeepSeek-R1 (Reasoning)**: Highly optimized for logical deduction, algorithmic complexity analysis, and multi-step synthesis.
   - **Qwen2.5-Coder (Coding)**: Specializes in AST parsing, bug detection, and semantic code context understanding.
-- **Hardware Optimization**: Default parameters tuned to 7B models to comfortably fit within 4GB VRAM hardware profiles.
+- **Hardware Optimization**: Uses localized 7B models for rapid intermediate agent tasks, while escalating heavy academic synthesis to high-parameter Cloud APIs (e.g., Mistral Large) for maximum density and quality.
 ### Hybrid Mamba-Transformer Neural Engine (`src/core/hybrid_engine.py`)
 - **Mamba Linear Scanner (`MambaLinearScanner`)**: $O(N)$ state-space model for rapid ingestion of large codebases and multi-page PDF notes.
 - **Transformer Attention Synthesizer (`TransformerAttentionSynthesizer`)**: Dense self-attention QKV engine connecting AST nodes to ArXiv citations.

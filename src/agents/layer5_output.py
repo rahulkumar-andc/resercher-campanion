@@ -24,30 +24,65 @@ class WriterAgent(BaseAgent):
         gaps_str = "\n".join([f"- {g}" for g in research.novelty_gaps]) if hasattr(research, 'novelty_gaps') and research.novelty_gaps else "None found"
         algos_str = ", ".join([a['name'] for a in code.algorithms]) if code.algorithms else "N/A"
         
+        # Deep Context Injection
+        unified_context = ctx.synthesis.unified_context if hasattr(ctx.synthesis, 'unified_context') else "No deep context available."
+        
         prompt = f"""
-You are an elite academic researcher and technical writer. Write a comprehensive, multi-page academic manuscript on the topic: "{topic}".
-Use the following structured outline and research context. The manuscript must sound highly professional, technical, and strictly analytical. Do not use conversational AI filler. 
-Make sure the content reflects the specific topic of "{topic}" deeply. Do not write generic boilerplate!
+You are an elite academic researcher, technical writer, and domain expert. 
+Write a highly analytical, deep, and factual academic manuscript on the topic: "{topic}".
 
-### OUTLINE ###
+Do not use conversational AI filler (e.g., "Here is the paper"). Do not use generic boilerplate. 
+Write densely packed, highly technical content that reads like a published paper in a top-tier journal.
+
+### DOCUMENT OUTLINE ###
 {outline_str}
 
-### CODE METRICS (Analyzed from Source Files) ###
-- Total Files: {code.file_count}
-- Total Lines: {code.total_lines}
-- Detected Algorithms & Patterns: {algos_str}
-
-### IDENTIFIED NOVELTY GAPS ###
-{gaps_str}
+### SYSTEM UNIFIED CONTEXT (Code, Algorithms & Literature) ###
+{unified_context}
 
 ### EXPECTED OUTPUT ###
-Generate the FULL Markdown content of the manuscript, complete with deep analysis, theoretical background, methodology (based on the code metrics), and detailed conclusions. Use academic headings (1. Introduction, 2. Literature Review, etc.). Ensure a minimum of 800 words.
+Generate the FULL Markdown content of the manuscript. 
+Include deep analysis, theoretical background, methodology (citing the function blocks), and detailed conclusions. 
+Ensure a minimum of 1500 words.
 """
         
-        system_prompt = "You are an AI autonomous research assistant that synthesizes code and literature into high-quality IEEE/ACM style markdown papers."
+        system_prompt = "You are an elite academic writer synthesizing code and literature into high-quality IEEE/ACM style markdown papers."
         
-        # Generate the main manuscript content using the LLM
-        generated_manuscript = self.llm.generate(prompt=prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
+        # Issue #1 Fix: Use powerful external API (Mistral/OpenAI compatible) instead of weak 4GB VRAM 7B model
+        import requests
+        api_key = "gKmScWP4TVINiL0BXlW5WPdvmVNVdRiW"
+        
+        self.log(ctx, "Calling high-parameter Cloud LLM for academic synthesis (Bypassing 7B local limits)...")
+        generated_manuscript = ""
+        try:
+            # Assuming Mistral API based on 32-char alphanumeric format, fallback compatible with standard chat/completions
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "mistral-large-latest", # Powerful model suitable for academic writing
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 4000
+            }
+            
+            resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=120)
+            
+            if resp.status_code == 200:
+                generated_manuscript = resp.json()["choices"][0]["message"]["content"]
+                self.log(ctx, "Cloud LLM generation successful.")
+            else:
+                self.log(ctx, f"Cloud LLM API Error ({resp.status_code}): {resp.text}", level="WARN")
+                raise Exception("Cloud API Failed")
+                
+        except Exception as e:
+            self.log(ctx, f"Falling back to Local LLM due to Cloud API error: {e}", level="WARN")
+            # Fallback to local 7B model
+            generated_manuscript = self.llm.generate(prompt=prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
         
         # Check if fallback happened (Ollama not connected or Timeout)
         if "[LocalLLM Offline Fallback" in generated_manuscript or "[LLM " in generated_manuscript:
