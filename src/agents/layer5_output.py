@@ -50,39 +50,61 @@ Ensure a minimum of 1500 words.
         
         # Issue #1 Fix: Use powerful external API (Mistral/OpenAI compatible) instead of weak 4GB VRAM 7B model
         import requests
-        api_key = "gKmScWP4TVINiL0BXlW5WPdvmVNVdRiW"
+        import os
         
-        self.log(ctx, "Calling high-parameter Cloud LLM for academic synthesis (Bypassing 7B local limits)...")
-        generated_manuscript = ""
-        try:
-            # Assuming Mistral API based on 32-char alphanumeric format, fallback compatible with standard chat/completions
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "mistral-large-latest", # Powerful model suitable for academic writing
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.2,
-                "max_tokens": 4000
-            }
-            
-            resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=120)
-            
-            if resp.status_code == 200:
-                generated_manuscript = resp.json()["choices"][0]["message"]["content"]
-                self.log(ctx, "Cloud LLM generation successful.")
-            else:
-                self.log(ctx, f"Cloud LLM API Error ({resp.status_code}): {resp.text}", level="WARN")
-                raise Exception("Cloud API Failed")
+        # Load key from .env or environment
+        api_key = os.environ.get("CLOUD_LLM_API_KEY")
+        if not api_key:
+            try:
+                with open(".env", "r") as f:
+                    for line in f:
+                        if line.startswith("CLOUD_LLM_API_KEY="):
+                            api_key = line.strip().split("=", 1)[1]
+                            break
+            except Exception:
+                pass
                 
-        except Exception as e:
-            self.log(ctx, f"Falling back to Local LLM due to Cloud API error: {e}", level="WARN")
-            # Fallback to local 7B model
+        if not api_key:
+            self.log(ctx, "CLOUD_LLM_API_KEY not found in .env. Falling back to Local LLM.", level="WARN")
+        else:
+            self.log(ctx, "Calling high-parameter Cloud LLM for academic synthesis (Bypassing 7B local limits)...")
+            
+        generated_manuscript = ""
+        
+        if api_key:
+            try:
+                # Assuming Mistral API based on 32-char alphanumeric format, fallback compatible with standard chat/completions
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": "mistral-large-latest", # Powerful model suitable for academic writing
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 4000
+                }
+                
+                resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=120)
+                
+                if resp.status_code == 200:
+                    generated_manuscript = resp.json()["choices"][0]["message"]["content"]
+                    self.log(ctx, "Cloud LLM generation successful.")
+                else:
+                    self.log(ctx, f"Cloud LLM API Error ({resp.status_code}): {resp.text}", level="WARN")
+                    raise Exception("Cloud API Failed")
+                    
+            except Exception as e:
+                self.log(ctx, f"Falling back to Local LLM due to Cloud API error: {e}", level="WARN")
+                generated_manuscript = "" # Fall through to local LLM
+
+        # Fallback to local 7B model if Cloud LLM wasn't used or failed
+        if not generated_manuscript:
             generated_manuscript = self.llm.generate(prompt=prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
+
         
         # Check if fallback happened (Ollama not connected or Timeout)
         if "[LocalLLM Offline Fallback" in generated_manuscript or "[LLM " in generated_manuscript:
