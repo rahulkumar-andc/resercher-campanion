@@ -285,8 +285,11 @@ class WriterAgent(BaseAgent):
             section_title = section_dict['section']
             section_topics = ", ".join(section_dict['topics'])
             
-            if section_title in self.agents:
-                section_content = self.agents[section_title].run(ctx, section_topics, user_existing_text=None)
+            import re
+            base_title = re.sub(r'^\d+\.\s*', '', section_title).strip()
+            
+            if base_title in self.agents:
+                section_content = self.agents[base_title].run(ctx, section_topics, user_existing_text=None)
             else:
                 section_content = self.generic_agent.run(ctx, section_title, section_topics, user_existing_text=None)
             
