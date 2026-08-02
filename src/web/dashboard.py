@@ -341,13 +341,15 @@ async def serve_nn2d_ui():
     with open(os.path.join(os.path.dirname(__file__), "static", "nn_2d.html")) as f:
         return f.read()
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 def render_dashboard():
-    return """<!DOCTYPE html>
+    return HTMLResponse(
+        content="""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store" />
     <title>Autonomous Research Companion — Research Pipeline Control Center</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
@@ -880,9 +882,13 @@ def render_dashboard():
             currentJobId = data.job_id;
             document.getElementById("log-box").innerHTML +=
                 `<div class="log-entry"><span class="badge badge-info">SYSTEM</span> Started ${data.job_id} mode=${data.job_mode} writer=${data.writer_mode}</div>`;
-            if (pollTimer) clearInterval(pollTimer);
+            stopPolling();
             pollJob();
             pollTimer = setInterval(pollJob, 2500);
+        }
+
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
 
         function onModeChange() {
@@ -923,9 +929,14 @@ def render_dashboard():
         }
 
         async function pollJob() {
-            if (!currentJobId) return;
-            const res = await fetch("/api/jobs/" + currentJobId);
-            if (!res.ok) return;
+            if (!currentJobId) { stopPolling(); return; }
+            const res = await fetch("/api/jobs/" + encodeURIComponent(currentJobId));
+            if (!res.ok) {
+                // Missing/invalid job — never keep hammering a fake or stale id
+                currentJobId = null;
+                stopPolling();
+                return;
+            }
             const data = await res.json();
 
             const fmt = (v) => (v === null || v === undefined) ? "—" : (v + "%");
@@ -943,6 +954,7 @@ def render_dashboard():
                 document.getElementById("manuscript-preview").innerText = data.manuscript_preview;
             }
             if (data.stage === "COMPLETED" || data.stage === "FAILED") {
+                stopPolling();
                 loadJobHistory();
             }
         }
@@ -1006,4 +1018,9 @@ def render_dashboard():
         }
     </script>
 </body>
-</html>"""
+</html>""",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
