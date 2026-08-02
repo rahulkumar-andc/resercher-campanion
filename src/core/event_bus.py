@@ -19,6 +19,7 @@ class SupervisorBus:
         self._async_listeners.append(callback)
 
     def publish(self, ctx: PipelineContext, agent_name: str, layer: int, content: str, level: str = "INFO", data: Dict[str, Any] = None):
+        from src.core.progress import update_progress
         msg = AgentMessage(
             agent_name=agent_name,
             layer=layer,
@@ -29,6 +30,7 @@ class SupervisorBus:
         )
         ctx.logs.append(msg)
         self._message_history.append(msg)
+        update_progress(ctx, agent_name=agent_name)
 
         for listener in self._listeners:
             try:
@@ -36,7 +38,6 @@ class SupervisorBus:
             except Exception as e:
                 print(f"[EventBus Error] Listener exception: {e}")
 
-        # Async notifications if event loop exists
         try:
             loop = asyncio.get_running_loop()
             for async_listener in self._async_listeners:
@@ -45,7 +46,9 @@ class SupervisorBus:
             pass
 
     def set_stage(self, ctx: PipelineContext, stage: PipelineStage, reason: str = ""):
+        from src.core.progress import update_progress
         ctx.stage = stage
+        update_progress(ctx, agent_name="SupervisorAgent", stage=stage)
         self.publish(
             ctx,
             agent_name="SupervisorAgent",

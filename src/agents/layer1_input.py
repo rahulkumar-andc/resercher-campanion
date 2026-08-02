@@ -210,23 +210,42 @@ class GitIngestor(BaseAgent):
         super().__init__("GitIngestor", layer=1, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Checking for Git repository URLs in topic or inputs...")
-        
-        urls = re.findall(r'https?://(?:www\.)?(?:github\.com|gitlab\.com)/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', ctx.raw_topic)
-        
-        code_urls = [p for p in ctx.raw_code_paths if p.startswith(('http://', 'https://', 'git@'))]
+        self.log(ctx, "Checking for Git repository URLs...")
+
+        urls = re.findall(
+            r"https?://(?:www\.)?(?:github\.com|gitlab\.com)/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:\.git)?",
+            ctx.raw_topic or "",
+        )
+        if ctx.github_url:
+            urls.append(ctx.github_url.strip())
+
+        code_urls = [p for p in ctx.raw_code_paths if p.startswith(("http://", "https://", "git@"))]
         urls.extend(code_urls)
         ctx.raw_code_paths = [p for p in ctx.raw_code_paths if p not in code_urls]
-        
-        if not urls:
+
+        # Deduplicate
+        seen = set()
+        clean = []
+        for u in urls:
+            u = u.rstrip("/").removesuffix(".git")
+            if u and u not in seen:
+                seen.add(u)
+                clean.append(u)
+
+        if not clean:
             self.log(ctx, "No Git repository URLs found to ingest.")
             return
 
-        for url in set(urls):
+        for url in clean:
             self.log(ctx, f"Found Git repository URL: {url}. Cloning...")
             try:
                 temp_dir = tempfile.mkdtemp(prefix="git_ingest_")
-                result = subprocess.run(["git", "clone", "--depth", "1", url, temp_dir], capture_output=True, text=True)
+                result = subprocess.run(
+                    ["git", "clone", "--depth", "1", url, temp_dir],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
                 if result.returncode == 0:
                     self.log(ctx, f"Successfully cloned {url} to {temp_dir}")
                     ctx.raw_code_paths.append(temp_dir)

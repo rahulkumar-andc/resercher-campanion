@@ -31,7 +31,7 @@ class TestDashboardAndLayer0(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Autonomous Research Companion", response.text)
-        self.assertIn("27-Agent Neural Event Bus", response.text)
+        self.assertIn("Heuristic QA", response.text)
 
     def test_job_creation_and_api(self):
         response = self.client.post("/api/jobs", json={

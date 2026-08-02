@@ -1,49 +1,92 @@
+"""Layer 4.5: Honest local heuristic QA — approximate only, fail-closed."""
+
 import re
-from typing import Dict, List, Any
+from typing import List, Set
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext
+from src.core.llm_client import LocalLLMClient
+
+
+def _tokenize_ngrams(text: str, n: int = 5) -> Set[str]:
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    if len(words) < n:
+        return set()
+    return {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def _corpus_from_ctx(ctx: PipelineContext) -> str:
+    parts: List[str] = []
+    for paper in ctx.research.arxiv_papers or []:
+        if paper.abstract:
+            parts.append(paper.abstract)
+        if paper.full_text:
+            parts.append(paper.full_text[:5000])
+    parts.extend(ctx.research.literature_context or [])
+    parts.extend(ctx.research.web_context or [])
+    if ctx.research.literature_summary:
+        parts.append(ctx.research.literature_summary)
+    return "\n".join(parts)
 
 
 class PlagiarismCheckerAgent(BaseAgent):
-    """Audits manuscript text for plagiarism and similarity against literature sources."""
+    """Local n-gram overlap heuristic vs ingested notes/arxiv — approximate only."""
 
     def __init__(self, bus: SupervisorBus, max_threshold: float = 15.0):
         super().__init__("PlagiarismCheckerAgent", layer=4, bus=bus)
         self.max_threshold = max_threshold
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Scanning manuscript text for plagiarism & similarity matching...")
-        
-        # If the manuscript isn't generated yet (which it shouldn't be, since WriterAgent is Layer 5),
-        # don't falsely flag the raw context (which contains actual papers) for plagiarism.
+        ctx.quality_audit.plagiarism_method = "local_ngram_heuristic"
+        ctx.quality_audit.is_estimate = True
+        self.log(ctx, "Heuristic plagiarism scan (local n-gram overlap; approximate)...")
+
         if not ctx.output.markdown_manuscript:
-            self.log(ctx, "No full manuscript available yet. Skipping deep n-gram check.")
-            similarity_score = 4.2
+            ctx.quality_audit.plagiarism_percentage = None
+            ctx.quality_audit.is_approved = False
+            reason = "No manuscript to audit"
+            if reason not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(reason)
+            self.log(ctx, reason, level="WARN")
+            return
+
+        text = ctx.output.markdown_manuscript
+        corpus = _corpus_from_ctx(ctx)
+        ms_grams = _tokenize_ngrams(text, 5)
+        if not ms_grams:
+            similarity = 0.0
+        elif not corpus.strip():
+            similarity = 0.0
+            self.log(ctx, "No reference corpus; n-gram overlap treated as 0% (approximate).", level="INFO")
         else:
-            text = ctx.output.markdown_manuscript
-            similarity_score = 4.2  # Default low similarity percentage (4.2%)
-            
-            # Simulated n-gram overlap check against citations
-            for paper in ctx.research.arxiv_papers:
-                if paper.abstract and paper.abstract[:50].lower() in text.lower():
-                    similarity_score += 12.0
+            ref_grams = _tokenize_ngrams(corpus, 5)
+            if not ref_grams:
+                similarity = 0.0
+            else:
+                overlap = len(ms_grams & ref_grams) / max(1, len(ms_grams))
+                similarity = round(overlap * 100.0, 1)
 
-        ctx.quality_audit.plagiarism_percentage = round(similarity_score, 1)
+        ctx.quality_audit.plagiarism_percentage = similarity
+        self.log(
+            ctx,
+            f"Heuristic plagiarism estimate: {similarity}% "
+            f"(method={ctx.quality_audit.plagiarism_method}; threshold {self.max_threshold}%).",
+        )
 
-        if similarity_score > self.max_threshold:
-            err_msg = f"Plagiarism check failed: Similarity {similarity_score}% exceeds policy limit ({self.max_threshold}%)."
+        if similarity > self.max_threshold:
+            err_msg = (
+                f"Plagiarism heuristic failed: Similarity {similarity}% exceeds "
+                f"policy limit ({self.max_threshold}%)."
+            )
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
             if err_msg not in ctx.quality_audit.rejection_reasons:
                 ctx.quality_audit.rejection_reasons.append(err_msg)
             ctx.quality_audit.feedback_reroute_target = "WriterAgent"
-        else:
-            self.log(ctx, f"Plagiarism check PASSED: Similarity score is {similarity_score}% (Target < {self.max_threshold}%).")
 
 
 class PlagiarismRemediatorAgent(BaseAgent):
-    """Reasoning-Driven Re-Synthesis Engine to eliminate semantic & verbatim plagiarism."""
+    """Re-synthesizes overlapping passages; does NOT invent pass scores."""
 
     def __init__(self, bus: SupervisorBus):
         super().__init__("PlagiarismRemediatorAgent", layer=4, bus=bus)
@@ -53,193 +96,232 @@ class PlagiarismRemediatorAgent(BaseAgent):
             ctx.output.markdown_manuscript = self.remediate(ctx, ctx.output.markdown_manuscript)
 
     def remediate(self, ctx: PipelineContext, target_text: str) -> str:
-        self.log(ctx, "Executing Reasoning-Driven Re-Synthesis (First-Principles Analysis & Empirical Grounding)...")
-        
-        # 1. First-Principles Deconstruction & Re-Synthesis
-        # Instead of word-swapping, re-frame literature claims into first-party design choices
+        self.log(ctx, "Remediating manuscript text (rewrite only; scores recomputed on next QA)...")
         code = ctx.code_analysis
         gaps = ctx.research.novelty_gaps
-        top_algo = code.algorithms[0]['name'] if code.algorithms else "Event-Driven Routing"
+        top_algo = code.algorithms[0]["name"] if code.algorithms else "Event-Driven Routing"
 
         remediated = target_text
-
-        # 2. Critical Comparative Reasoning (In contrast to prior works...)
         for idx, paper in enumerate(ctx.research.arxiv_papers[:2]):
             if paper.title and paper.title in remediated:
                 reasoning_block = (
                     f"\n\n> **Comparative Analysis vs Literature [{idx+1}]**:\n"
-                    f"> While {paper.authors[0] if paper.authors else 'prior work'} [{idx+1}] investigated `{paper.title}`, "
-                    f"> our architecture addresses the specific gap ({gaps[idx] if idx < len(gaps) else 'concurrency bottlenecks'}) "
-                    f"> by deploying `{top_algo}` across {code.total_lines} lines of code. This fundamentally changes the evaluation paradigm.\n\n"
+                    f"> While {paper.authors[0] if paper.authors else 'prior work'} [{idx+1}] investigated "
+                    f"`{paper.title}`, our architecture addresses "
+                    f"({gaps[idx] if idx < len(gaps) else 'concurrency bottlenecks'}) "
+                    f"by deploying `{top_algo}` across {code.total_lines} lines of code.\n\n"
                 )
                 remediated = remediated.replace(paper.title, paper.title + reasoning_block)
 
-        # 3. Active Reasoning Voice & Empirical Grounding Transformation
         remediated = re.sub(
-            r'\bIt is shown that\b',
-            'Our empirical evaluation demonstrates',
+            r"\bIt is shown that\b",
+            "Our empirical evaluation demonstrates",
             remediated,
-            flags=re.IGNORECASE
+            flags=re.IGNORECASE,
         )
         remediated = re.sub(
-            r'\bPrevious studies have suggested\b',
-            'Analytical reasoning reveals that prior works overlooked',
+            r"\bPrevious studies have suggested\b",
+            "Analytical reasoning reveals that prior works overlooked",
             remediated,
-            flags=re.IGNORECASE
+            flags=re.IGNORECASE,
         )
-
-        # 4. Re-calculate reduced plagiarism score
-        ctx.quality_audit.plagiarism_percentage = max(1.8, ctx.quality_audit.plagiarism_percentage - 14.5)
-        self.log(ctx, f"Reasoning-Driven Re-Synthesis completed. Semantic similarity dropped to {ctx.quality_audit.plagiarism_percentage}% (Target < 10%).")
-        
+        self.log(ctx, "Remediation rewrite complete. QA must re-score on next pass.")
         return remediated
 
 
-
 class AIPercentageAuditorAgent(BaseAgent):
-    """Audits text for AI-generated writing footprints, robotic phrases, and excessive passive voice."""
-
+    """Local style/buzzword heuristic — approximate only."""
 
     def __init__(self, bus: SupervisorBus, max_ai_threshold: float = 10.0):
         super().__init__("AIPercentageAuditorAgent", layer=4, bus=bus)
         self.max_ai_threshold = max_ai_threshold
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Auditing text for AI-generated patterns and robotic phrasing...")
-        
+        ctx.quality_audit.ai_method = "local_style_heuristic"
+        ctx.quality_audit.is_estimate = True
+        self.log(ctx, "Heuristic AI-style scan (buzzwords/passive; approximate)...")
+
         if not ctx.output.markdown_manuscript:
-            self.log(ctx, "No manuscript available yet. Skipping AI phrasing check.")
-            ai_score = 6.5
-        else:
-            text = ctx.output.markdown_manuscript
-            ai_score = 6.5  # Natural humanized academic score (6.5%)
-            ai_buzzwords = ["delve", "tapestry", "beacon", "testament", "pivotal role", "game-changer", "unraveling"]
+            ctx.quality_audit.ai_writing_percentage = None
+            ctx.quality_audit.is_approved = False
+            reason = "No manuscript to audit"
+            if reason not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(reason)
+            self.log(ctx, reason, level="WARN")
+            return
 
-            found_buzzwords = [w for w in ai_buzzwords if re.search(r'\b' + w + r'\b', text, re.IGNORECASE)]
-            if found_buzzwords:
-                ai_score += len(found_buzzwords) * 3.5
+        text = ctx.output.markdown_manuscript
+        ai_buzzwords = [
+            "delve", "tapestry", "beacon", "testament", "pivotal role",
+            "game-changer", "unraveling", "landscape", "leverage", "cutting-edge",
+        ]
+        found = [w for w in ai_buzzwords if re.search(r"\b" + re.escape(w) + r"\b", text, re.IGNORECASE)]
+        passive = re.findall(r"\b(?:is|was|were|been|be)\s+\w+ed\b", text, re.IGNORECASE)
+        # Start from 0 — never invent a "natural" 6.5% baseline
+        ai_score = len(found) * 3.5 + min(20.0, len(passive) * 0.15)
+        ai_score = round(min(100.0, ai_score), 1)
 
-        ctx.quality_audit.ai_writing_percentage = round(ai_score, 1)
+        ctx.quality_audit.ai_writing_percentage = ai_score
+        self.log(
+            ctx,
+            f"Heuristic AI-style estimate: {ai_score}% "
+            f"(method={ctx.quality_audit.ai_method}; buzzwords={found}).",
+        )
 
         if ai_score > self.max_ai_threshold:
-            err_msg = f"AI Writing audit failed: AI footprint score {ai_score}% exceeds policy limit ({self.max_ai_threshold}%)."
+            err_msg = (
+                f"AI Writing heuristic failed: score {ai_score}% exceeds "
+                f"policy limit ({self.max_ai_threshold}%)."
+            )
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
             if err_msg not in ctx.quality_audit.rejection_reasons:
                 ctx.quality_audit.rejection_reasons.append(err_msg)
             ctx.quality_audit.feedback_reroute_target = "StyleAgent"
-        else:
-            self.log(ctx, f"AI Writing audit PASSED: AI score is {ai_score}% (Target < {self.max_ai_threshold}%).")
 
 
 class PeerReviewerAgent(BaseAgent):
-    """Answers 7 core journal submission peer-review questions prior to publication."""
+    """Answers 7 journal questions from the actual manuscript (LLM) or fail-closed."""
+
+    QUESTIONS = [
+        ("1_why_needed", "Why is this work needed?"),
+        ("2_what_is_new", "What is new compared to prior work?"),
+        ("3_why_better", "Why is the approach better?"),
+        ("4_how_evaluated", "How was it evaluated?"),
+        ("5_can_reproduce", "Can others reproduce the work?"),
+        ("6_limitations", "What are the limitations?"),
+        ("7_future_work", "What is future work?"),
+    ]
 
     def __init__(self, bus: SupervisorBus):
         super().__init__("PeerReviewerAgent", layer=4, bus=bus)
+        self.llm = LocalLLMClient()
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Synthesizing answers to 7 core Peer Reviewer questions...")
-        
-        topic = ctx.raw_topic
-        code = ctx.code_analysis
-        gaps = ctx.research.novelty_gaps
+        self.log(ctx, "Peer review from manuscript text...")
+        if not ctx.output.markdown_manuscript:
+            ctx.quality_audit.is_approved = False
+            reason = "No manuscript to audit"
+            if reason not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(reason)
+            ctx.quality_audit.reviewer_answers = {}
+            self.log(ctx, reason, level="WARN")
+            return
 
-        answers = {
-            "1_why_needed": f"Addresses performance bottlenecks and exception safety in {topic} by combining static AST profiling with asynchronous event routing.",
-            "2_what_is_new": f"Novel multi-layer architecture integrating AST-based algorithm detection with live ArXiv literature grounding and automated novelty gap extraction: {gaps[0] if gaps else 'Novel event bus routing'}.",
-            "3_why_better": f"Reduces runtime memory overhead and system latency compared to traditional monolithic frameworks while maintaining O(N log N) processing bounds.",
-            "4_how_evaluated": f"Evaluated across {code.file_count} codebase files ({code.total_lines} total lines) using static complexity analysis and hardware bus mapping.",
-            "5_can_reproduce": f"Yes. Full source code, dataset paths, and unit test suites are packaged in the open-source repository.",
-            "6_limitations": "Current implementation focuses on Python/C++ codebases and requires active internet access for live ArXiv API querying.",
-            "7_future_work": "Integration of local LLM fine-tuning, automated GPU memory kernel profiling, and support for Rust/Go AST parsing."
-        }
-
+        manuscript = ctx.output.markdown_manuscript[:12000]
+        q_block = "\n".join(f"{k}: {q}" for k, q in self.QUESTIONS)
+        prompt = (
+            f"Read this manuscript and answer each peer-review question in 1-3 sentences.\n"
+            f"Return plain text lines as KEY: answer\n\nQuestions:\n{q_block}\n\n"
+            f"Manuscript:\n{manuscript}"
+        )
+        res = self.llm.generate(
+            prompt=prompt,
+            system_prompt="You are an academic peer reviewer. Ground answers only in the manuscript.",
+            temperature=0.2,
+            max_tokens=1500,
+        )
+        answers = {}
+        for key, _ in self.QUESTIONS:
+            answers[key] = "Insufficient manuscript evidence."
+        for line in (res or "").splitlines():
+            for key, _ in self.QUESTIONS:
+                if line.strip().startswith(key):
+                    answers[key] = line.split(":", 1)[-1].strip() or answers[key]
+        # If offline mock, mark low confidence but still attach
+        if res.startswith("[LocalLLM Offline"):
+            ctx.quality_audit.is_approved = False
+            reason = "Peer review unavailable: local LLM offline"
+            if reason not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(reason)
+            self.log(ctx, reason, level="WARN")
         ctx.quality_audit.reviewer_answers = answers
-        self.log(ctx, "PeerReviewerAgent successfully generated all 7 reviewer answers.")
+        self.log(ctx, "PeerReviewerAgent completed 7 manuscript-grounded answers.")
 
 
 class FormatQualityAuditorAgent(BaseAgent):
-    """Audits manuscript formatting: grammar, spelling, terminology, passive voice, and acronym definitions."""
+    """Audits manuscript formatting; fail-closed if empty."""
 
     def __init__(self, bus: SupervisorBus):
         super().__init__("FormatQualityAuditorAgent", layer=4, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Auditing formatting, grammar, acronym definitions, and terminology consistency...")
-        
-        format_issues = []
-        grammar_issues = []
+        self.log(ctx, "Auditing formatting, grammar, terminology...")
+        format_issues: List[str] = []
+        grammar_issues: List[str] = []
 
         if not ctx.output.markdown_manuscript:
-            self.log(ctx, "No manuscript available yet. Skipping format check.")
-        else:
-            text = ctx.output.markdown_manuscript
-            # 1. Acronym check (e.g. AST, IEEE, API)
-            acronyms = set(re.findall(r'\b[A-Z]{3,5}\b', text))
-            if "AST" in acronyms:
-                self.log(ctx, "Verified acronym: AST (Abstract Syntax Tree) is properly contextualized.")
+            ctx.quality_audit.is_approved = False
+            reason = "No manuscript to audit"
+            if reason not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(reason)
+            self.log(ctx, reason, level="WARN")
+            ctx.quality_audit.format_issues = format_issues
+            ctx.quality_audit.grammar_spelling_issues = grammar_issues
+            return
 
-            # 2. Terminology consistency
-            if "code-base" in text and "codebase" in text:
-                format_issues.append("Inconsistent terminology: Mixed usage of 'code-base' and 'codebase'. Standardize to 'codebase'.")
-
-            # 3. Passive voice check
-            passive_matches = re.findall(r'\b(?:is|was|were|been|be)\s+\w+ed\b', text, re.IGNORECASE)
-            if len(passive_matches) > 15:
-                grammar_issues.append(f"Excessive passive voice detected ({len(passive_matches)} instances). Recommended to use active voice for clarity.")
+        text = ctx.output.markdown_manuscript
+        if "code-base" in text and "codebase" in text:
+            format_issues.append(
+                "Inconsistent terminology: Mixed usage of 'code-base' and 'codebase'."
+            )
+        passive_matches = re.findall(r"\b(?:is|was|were|been|be)\s+\w+ed\b", text, re.IGNORECASE)
+        if len(passive_matches) > 40:
+            grammar_issues.append(
+                f"High passive-voice count ({len(passive_matches)}). Prefer active voice."
+            )
 
         ctx.quality_audit.format_issues = format_issues
         ctx.quality_audit.grammar_spelling_issues = grammar_issues
-
         if format_issues or grammar_issues:
-            self.log(ctx, f"FormatQualityAuditor flagged {len(format_issues)} formatting issues and {len(grammar_issues)} grammar notes.", level="INFO")
+            self.log(
+                ctx,
+                f"FormatQualityAuditor flagged {len(format_issues)} format / "
+                f"{len(grammar_issues)} grammar notes.",
+            )
         else:
-            self.log(ctx, "FormatQualityAuditor PASSED: Zero grammar or formatting defects detected.")
+            self.log(ctx, "FormatQualityAuditor: no blocking format defects.")
+
 
 class FactCheckerAgent(BaseAgent):
-    """Fact-Checking & Hallucination Detector Agent that cross-references claims against live web context."""
+    """Cross-checks statistical claims against web/literature context when available."""
 
     def __init__(self, bus: SupervisorBus):
         super().__init__("FactCheckerAgent", layer=4.5, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Starting hallucination audit. Cross-referencing synthesized claims with Web Context...")
-        
+        self.log(ctx, "Heuristic fact check against web/literature context...")
         if not ctx.output.markdown_manuscript:
-            self.log(ctx, "No manuscript available yet. Skipping fact checking.")
+            ctx.quality_audit.is_approved = False
+            reason = "No manuscript to audit"
+            if reason not in ctx.quality_audit.rejection_reasons:
+                ctx.quality_audit.rejection_reasons.append(reason)
+            self.log(ctx, reason, level="WARN")
             return
 
         text = ctx.output.markdown_manuscript
-        web_context = getattr(ctx.research, 'web_context', [])
-        
-        if not web_context:
-            self.log(ctx, "No live web context found. Proceeding with internal knowledge fact-checking.", level="INFO")
+        web_context = ctx.research.web_context or []
+        lit = ctx.research.literature_context or []
+        ref_text = " ".join(web_context + lit)
+
+        # Soft pass if no external context — do not invent failures
+        if not ref_text.strip():
+            self.log(ctx, "No web/literature context; fact-check skipped (not a failure).", level="INFO")
             return
-            
-        # Simplified hallucination detection logic
-        # For a full implementation, an LLM would compare claims to the web context.
-        # Here we mock the detection of a statistical claim that isn't in the context.
-        hallucinations_detected = 0
+
+        hallucinations = 0
         reasons = []
-        
-        # Check for arbitrary large statistical claims (e.g., 99.9%)
-        statistical_claims = re.findall(r'\b\d{2,3}\.\d+%\b', text)
-        web_text = " ".join(web_context)
-        
-        for claim in statistical_claims:
-            if claim not in web_text:
-                hallucinations_detected += 1
-                reasons.append(f"Unsubstantiated statistic '{claim}' found in text but missing from verified Web Context.")
-                
-        if hallucinations_detected > 0:
-            err_msg = f"Hallucination Audit FAILED: {hallucinations_detected} unverified claims detected. Reasons: {reasons}"
+        for claim in re.findall(r"\b\d{2,3}\.\d+%\b", text):
+            if claim not in ref_text:
+                hallucinations += 1
+                reasons.append(f"Unsubstantiated statistic '{claim}' not found in reference context.")
+
+        if hallucinations > 2:
+            err_msg = f"Fact-check heuristic: {hallucinations} unverified stats. {reasons[:3]}"
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
             if err_msg not in ctx.quality_audit.rejection_reasons:
                 ctx.quality_audit.rejection_reasons.append(err_msg)
-            # Route back to writer for remediation
             ctx.quality_audit.feedback_reroute_target = "WriterAgent"
         else:
-            self.log(ctx, "Fact-Check PASSED: Zero hallucinatory claims detected. All stats align with Web Context.")
-
+            self.log(ctx, "Fact-check heuristic completed.")

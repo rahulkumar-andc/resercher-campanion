@@ -140,11 +140,14 @@
         const height = window.innerHeight;
         
         const ARC_LAYERS = [
-            { id: 0, name: "Vector Space", count: 20, color: "#3b82f6" },
-            { id: 1, name: "Mamba State", count: 45, color: "#8b5cf6" },
-            { id: 2, name: "Latent Reasoning", count: 65, color: "#d946ef" },
-            { id: 3, name: "Audit Critic", count: 35, color: "#ec4899" },
-            { id: 4, name: "Output Synthesis", count: 12, color: "#2ecc71" }
+            { id: 0, name: "Profiler (L0)", count: 10, color: "#64748b" },
+            { id: 1, name: "Input (L1)", count: 25, color: "#3b82f6" },
+            { id: 2, name: "Analysis (L2)", count: 35, color: "#8b5cf6" },
+            { id: 3, name: "Grounding (L3)", count: 40, color: "#f59e0b" },
+            { id: 4, name: "Synthesis (L4)", count: 25, color: "#ec4899" },
+            { id: 5, name: "Audit (L4.5)", count: 30, color: "#ef4444" },
+            { id: 6, name: "Output (L5)", count: 15, color: "#2ecc71" },
+            { id: 7, name: "Supervisor (L6)", count: 10, color: "#eab308" }
         ];
 
         const nodes = [];
@@ -179,7 +182,7 @@
             .force("link", d3.forceLink(links).id(d => d.id).distance(50))
             .force("charge", d3.forceManyBody().strength(-30))
             .force("center", d3.forceCenter(width / 2, height / 2))
-            .force("x", d3.forceX(d => (d.layer * 200) + (width/2 - 400)).strength(1))
+            .force("x", d3.forceX(d => (d.layer * 150) + (width/2 - 525)).strength(1))
             .force("y", d3.forceY(height / 2).strength(0.1));
 
         const link = container.append("g")
@@ -193,7 +196,7 @@
             .data(nodes)
             .join("circle")
             .attr("class", "node")
-            .attr("r", d => d.layer === 0 || d.layer === 4 ? 6 : 4)
+            .attr("r", d => d.layer === 0 || d.layer === 7 ? 6 : 4)
             .attr("fill", d => d.color)
             .call(drag(simulation));
 
@@ -240,7 +243,8 @@
             const data = JSON.parse(event.data);
             totalEvents++;
             
-            if (data.sender) activeAgents.add(data.sender);
+            const agentName = data.agent || data.sender;
+            if (agentName) activeAgents.add(agentName);
             
             document.getElementById('val-nodes').innerText = totalEvents.toString();
             document.getElementById('val-ops').innerText = activeAgents.size.toString();
@@ -248,14 +252,17 @@
             document.getElementById('val-params').style.color = '#eab308';
 
             let targetLayer = 0;
-            const sender = (data.sender || "").toLowerCase();
+            const sender = (agentName || "").toLowerCase();
             
-            if (sender.includes("git") || sender.includes("ingest")) targetLayer = 0;
-            else if (sender.includes("codebreaker") || sender.includes("ast")) targetLayer = 1;
-            else if (sender.includes("research") || sender.includes("analysis")) targetLayer = 2;
-            else if (sender.includes("critic") || sender.includes("audit")) targetLayer = 3;
-            else if (sender.includes("writer") || sender.includes("output")) targetLayer = 4;
-            else if (sender.includes("supervisor")) targetLayer = 2; 
+            if (sender.includes("profiler") || sender === "rpa") targetLayer = 0;
+            else if (sender.includes("git") || sender.includes("ingest") || sender.includes("input") || ["gi", "ci", "di", "sa", "qp"].includes(sender)) targetLayer = 1;
+            else if (sender.includes("analysis") || sender.includes("codebreaker") || sender.includes("ast") || ["cb", "ad", "ca", "hm", "be"].includes(sender)) targetLayer = 2;
+            else if (sender.includes("grounding") || ["wsa", "aa", "csa", "ea", "la", "gf", "fpa"].includes(sender)) targetLayer = 3;
+            else if (sender.includes("synthesis") || ["conn", "ob", "cit", "crit"].includes(sender)) targetLayer = 4;
+            else if (sender.includes("audit") || ["pc", "pr", "ai", "prv", "fqa"].includes(sender)) targetLayer = 5;
+            else if (sender.includes("output") || sender.includes("writer") || ["wa", "pdf", "ppt"].includes(sender)) targetLayer = 6;
+            else if (sender.includes("supervisor") || sender === "sup") targetLayer = 7;
+            else targetLayer = 2; 
 
             document.getElementById('val-cluster').innerText = ARC_LAYERS[targetLayer].name;
 
@@ -266,7 +273,7 @@
             node.attr("fill", d => {
                 if (d.layer === targetLayer) return '#ffffff';
                 return d.color;
-            }).attr("r", d => d.layer === targetLayer ? 8 : (d.layer === 0 || d.layer === 4 ? 6 : 4));
+            }).attr("r", d => d.layer === targetLayer ? 8 : (d.layer === 0 || d.layer === 7 ? 6 : 4));
 
             clearTimeout(window.idleTimer);
             window.idleTimer = setTimeout(() => {
@@ -277,7 +284,7 @@
                 activeAgents.clear();
                 document.getElementById('val-ops').innerText = '0';
                 
-                node.classed("active", false).attr("fill", d => d.color).attr("r", d => d.layer === 0 || d.layer === 4 ? 6 : 4);
+                node.classed("active", false).attr("fill", d => d.color).attr("r", d => d.layer === 0 || d.layer === 7 ? 6 : 4);
                 link.classed("active", false);
             }, 2000);
         };

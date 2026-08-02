@@ -155,11 +155,14 @@
     <script>
         // Layer definitions
         const ARC_LAYERS = [
-            { id: 0, name: "Vector Space (Ingestion)", count: 20, color: "#3b82f6" },
-            { id: 1, name: "AST Parser (Mamba State)", count: 45, color: "#8b5cf6" },
-            { id: 2, name: "Latent Reasoning (Transformer)", count: 65, color: "#d946ef" },
-            { id: 3, name: "Audit & Debate (Critic)", count: 35, color: "#ec4899" },
-            { id: 4, name: "Synthesis Output (Writer)", count: 12, color: "#2ecc71" }
+            { id: 0, name: "Profiler (L0)", count: 10, color: "#64748b" },
+            { id: 1, name: "Input (L1)", count: 25, color: "#3b82f6" },
+            { id: 2, name: "Analysis (L2)", count: 35, color: "#8b5cf6" },
+            { id: 3, name: "Grounding (L3)", count: 40, color: "#f59e0b" },
+            { id: 4, name: "Synthesis (L4)", count: 25, color: "#ec4899" },
+            { id: 5, name: "Audit (L4.5)", count: 30, color: "#ef4444" },
+            { id: 6, name: "Output (L5)", count: 15, color: "#2ecc71" },
+            { id: 7, name: "Supervisor (L6)", count: 10, color: "#eab308" }
         ];
 
         // Generate Nodes mapped to Z-planes
@@ -172,9 +175,9 @@
                     layer: layer.id,
                     name: layer.name,
                     color: layer.color,
-                    val: layer.id === 0 || layer.id === 4 ? 2 : (Math.random() * 2 + 1),
+                    val: layer.id === 0 || layer.id === 7 ? 2 : (Math.random() * 2 + 1),
                     // Force nodes into planes along Z axis
-                    z: (layer.id * 150) - 300, 
+                    z: (layer.id * 120) - 420, 
                     x: (Math.random() - 0.5) * 300,
                     y: (Math.random() - 0.5) * 300
                 });
@@ -218,7 +221,7 @@
             .d3Force('link', d3.forceLink().id(d => d.id).distance(40));
 
         // Disable standard force simulation pushing nodes out of their Z-planes
-        Graph.d3Force('z', d3.forceZ().z(d => (d.layer * 150) - 300).strength(1));
+        Graph.d3Force('z', d3.forceZ().z(d => (d.layer * 120) - 420).strength(1));
 
         // Add slow auto-rotation
         let angle = 0;
@@ -246,7 +249,8 @@
             totalEvents++;
             
             // Update Dashboard Stats
-            if (data.sender) activeAgents.add(data.sender);
+            const agentName = data.agent || data.sender;
+            if (agentName) activeAgents.add(agentName);
             document.getElementById('val-ops').innerText = activeAgents.size.toString();
             document.getElementById('val-nodes').innerText = totalEvents.toString();
             document.getElementById('val-params').innerText = 'Executing';
@@ -254,14 +258,17 @@
 
             // Determine Target Layer
             let targetLayer = 0;
-            const sender = (data.sender || "").toLowerCase();
+            const sender = (agentName || "").toLowerCase();
             
-            if (sender.includes("git") || sender.includes("ingest")) targetLayer = 0;
-            else if (sender.includes("codebreaker") || sender.includes("ast")) targetLayer = 1;
-            else if (sender.includes("research") || sender.includes("analysis")) targetLayer = 2;
-            else if (sender.includes("critic") || sender.includes("audit")) targetLayer = 3;
-            else if (sender.includes("writer") || sender.includes("output")) targetLayer = 4;
-            else if (sender.includes("supervisor")) targetLayer = 2; // general mid-level
+            if (sender.includes("profiler") || sender === "rpa") targetLayer = 0;
+            else if (sender.includes("git") || sender.includes("ingest") || sender.includes("input") || ["gi", "ci", "di", "sa", "qp"].includes(sender)) targetLayer = 1;
+            else if (sender.includes("analysis") || sender.includes("codebreaker") || sender.includes("ast") || ["cb", "ad", "ca", "hm", "be"].includes(sender)) targetLayer = 2;
+            else if (sender.includes("grounding") || ["wsa", "aa", "csa", "ea", "la", "gf", "fpa"].includes(sender)) targetLayer = 3;
+            else if (sender.includes("synthesis") || ["conn", "ob", "cit", "crit"].includes(sender)) targetLayer = 4;
+            else if (sender.includes("audit") || ["pc", "pr", "ai", "prv", "fqa"].includes(sender)) targetLayer = 5;
+            else if (sender.includes("output") || sender.includes("writer") || ["wa", "pdf", "ppt"].includes(sender)) targetLayer = 6;
+            else if (sender.includes("supervisor") || sender === "sup") targetLayer = 7;
+            else targetLayer = 2; // general mid-level
 
             document.getElementById('val-cluster').innerText = ARC_LAYERS[targetLayer].name;
 

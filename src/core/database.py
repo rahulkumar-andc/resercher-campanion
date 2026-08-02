@@ -8,7 +8,7 @@ import json
 import os
 import time
 from typing import Dict, Any, List, Optional
-from src.core.models import PipelineContext, QualityAuditResult, OutputResult
+from src.core.models import PipelineContext
 
 
 class DatabaseEngine:
@@ -39,7 +39,10 @@ class DatabaseEngine:
                     upskill_score REAL,
                     pdf_path TEXT,
                     pptx_path TEXT,
-                    created_at REAL
+                    created_at REAL,
+                    job_mode TEXT,
+                    writer_mode TEXT,
+                    manuscript_preview TEXT
                 )
             """)
             cursor.execute("""
@@ -53,14 +56,28 @@ class DatabaseEngine:
                     timestamp REAL
                 )
             """)
+            # Lightweight migrations for older DBs
+            cols = {r[1] for r in cursor.execute("PRAGMA table_info(jobs)").fetchall()}
+            for col, decl in (
+                ("job_mode", "TEXT"),
+                ("writer_mode", "TEXT"),
+                ("manuscript_preview", "TEXT"),
+            ):
+                if col not in cols:
+                    cursor.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
             conn.commit()
 
     def save_job(self, ctx: PipelineContext):
+        preview = (ctx.output.markdown_manuscript or "")[:4000]
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO jobs (job_id, raw_topic, stage, start_time, end_time, plagiarism_pct, ai_pct, upskill_score, pdf_path, pptx_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO jobs (
+                    job_id, raw_topic, stage, start_time, end_time,
+                    plagiarism_pct, ai_pct, upskill_score, pdf_path, pptx_path,
+                    created_at, job_mode, writer_mode, manuscript_preview
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     stage=excluded.stage,
                     end_time=excluded.end_time,
@@ -68,7 +85,10 @@ class DatabaseEngine:
                     ai_pct=excluded.ai_pct,
                     upskill_score=excluded.upskill_score,
                     pdf_path=excluded.pdf_path,
-                    pptx_path=excluded.pptx_path
+                    pptx_path=excluded.pptx_path,
+                    job_mode=excluded.job_mode,
+                    writer_mode=excluded.writer_mode,
+                    manuscript_preview=excluded.manuscript_preview
             """, (
                 ctx.job_id,
                 ctx.raw_topic,
@@ -80,7 +100,10 @@ class DatabaseEngine:
                 ctx.quality_audit.upskill_accuracy_score,
                 ctx.output.pdf_path,
                 ctx.output.pptx_path,
-                time.time()
+                time.time(),
+                getattr(ctx, "job_mode", "full_paper"),
+                getattr(ctx, "writer_mode", "multi"),
+                preview,
             ))
             conn.commit()
 
@@ -100,8 +123,20 @@ class DatabaseEngine:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def list_recent_jobs(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def list_recent_jobs(self, limit: int = 20) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_job_logs(self, job_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT agent_name, layer, content, level, timestamp FROM agent_logs "
+                "WHERE job_id = ? ORDER BY id DESC LIMIT ?",
+                (job_id, limit),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+            rows.reverse()
+            return rows

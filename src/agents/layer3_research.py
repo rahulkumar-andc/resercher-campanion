@@ -6,9 +6,15 @@ import time
 import tempfile
 import os
 from typing import List, Dict, Any
+import concurrent.futures
+from pydantic import BaseModel, Field
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext, CitationItem
+from src.core.skills_loader import load_skill_prompt, faculty_skill_addendum, select_research_skill
+
+class ResearchFindings(BaseModel):
+    findings: List[str] = Field(description="List of key research findings")
 
 try:
     import fitz  # PyMuPDF
@@ -174,30 +180,11 @@ class ArXivAgent(BaseAgent):
             self._save_cache(topic, papers)
             self.log(ctx, f"Successfully retrieved {len(papers)} papers live from ArXiv.")
         except Exception as e:
-            self.log(ctx, f"Live ArXiv API query failed/offline ({e}). Generating domain-grounded citation references.", level="WARN")
-            # Domain-grounded fallback citations
-            papers = [
-                CitationItem(
-                    key="ref_agent_2025",
-                    title="Autonomous Multi-Agent Architecture for System Code Analysis and Research Synthesis",
-                    authors=["V. Sharma", "A. Patel", "R. Gupta"],
-                    year="2025",
-                    journal_or_arxiv="IEEE Transactions on Software Engineering",
-                    abstract="Presents an event-bus driven multi-agent pipeline for analyzing source code complexity and generating literature reviews.",
-                    url="https://arxiv.org/abs/2501.01234",
-                    bibtex="@article{Sharma2025,\n  title={Autonomous Multi-Agent Architecture for System Code Analysis},\n  author={Sharma, V. and Patel, A.},\n  journal={IEEE TSE},\n  year={2025}\n}"
-                ),
-                CitationItem(
-                    key="ref_complexity_2024",
-                    title="Automated Big-O Algorithmic Profiling and Hardware Mapping in Heterogeneous Systems",
-                    authors=["M. Chen", "L. Zhang"],
-                    year="2024",
-                    journal_or_arxiv="ACM Computing Surveys",
-                    abstract="Detailed study on automated AST inspection for time/space complexity analysis and memory bandwidth optimization.",
-                    url="https://arxiv.org/abs/2405.09876",
-                    bibtex="@article{Chen2024,\n  title={Automated Big-O Algorithmic Profiling},\n  author={Chen, M. and Zhang, L.},\n  journal={ACM Comput. Surv.},\n  year={2024}\n}"
-                )
-            ]
+            papers = []
+            warn = f"ArXiv API query failed/offline ({e}). No fabricated citations; papers list empty."
+            self.log(ctx, warn, level="WARN")
+            if warn not in ctx.errors:
+                ctx.errors.append(warn)
 
         ctx.research.arxiv_papers = papers
 
@@ -207,13 +194,65 @@ class CSAgent(BaseAgent):
         super().__init__("CSAgent", layer=3, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Retrieving Computer Science benchmarks, algorithmic paradigms, and system design patterns...")
-        ctx.research.cs_context = [
-            "Asynchronous message routing improves system throughput by decoupling producer-consumer execution loops.",
-            "AST-based static code analysis enables deterministic algorithm detection with zero runtime execution overhead.",
-            "Automated citation grounding prevents hallucination by anchoring generated hypotheses to peer-reviewed bibliographies."
-        ]
-        self.log(ctx, "CSAgent compiled CS literature and design benchmarks.")
+        self.log(ctx, "Starting General Research Protocol for CS literature...")
+        topic = ctx.raw_topic
+        skill_key = select_research_skill(topic)
+        # Prefer mapped Claude-plugin research skill; fall back to general_research flat/plugin
+        system_prompt = load_skill_prompt(skill_key if skill_key != "research" else "general_research")
+        self.log(ctx, f"CSAgent using skill map key: {skill_key}")
+        slug = topic.replace(" ", "_")[:20].lower()
+        work_dir = os.path.join(ctx.work_dir if hasattr(ctx, 'work_dir') else "./output", "general_research", slug)
+        os.makedirs(os.path.join(work_dir, "sources"), exist_ok=True)
+        
+        # Phase 1: Decompose
+        self.log(ctx, "Phase 1: Decomposing into sub-questions...")
+        decomp_prompt = f"Decompose this CS topic into 3 specific technical sub-questions: {topic}. Output JSON: {{\"sub_questions\": [\"q1\", \"q2\", \"q3\"]}}"
+        decomp_res = self.llm.generate(prompt=decomp_prompt, system_prompt=system_prompt)
+        
+        try:
+            if decomp_res.startswith("```json"): decomp_res = decomp_res[7:-3].strip()
+            elif decomp_res.startswith("```"): decomp_res = decomp_res[3:-3].strip()
+            sub_qs = json.loads(decomp_res).get("sub_questions", [topic])
+        except Exception:
+            sub_qs = [f"{topic} algorithms", f"{topic} system architecture", f"{topic} performance"]
+            
+        with open(os.path.join(work_dir, "plan.md"), "w") as f:
+            f.write(f"# Sub-Questions\n" + "\n".join(f"- {q}" for q in sub_qs))
+            
+        # Phase 2 & 3: Search and Extract
+        self.log(ctx, "Phase 2 & 3: Searching for CS literature...")
+        collected_context = []
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                for i, q in enumerate(sub_qs):
+                    self.log(ctx, f"CSAgent searching: {q}")
+                    results = list(ddgs.text(q, max_results=2))
+                    for j, r in enumerate(results):
+                        source_id = f"cs_source_{i}_{j}"
+                        content = f"Title: {r.get('title')}\nURL: {r.get('href')}\nContent: {r.get('body')}"
+                        with open(os.path.join(work_dir, "sources", f"{source_id}.md"), "w") as sf:
+                            sf.write(content)
+                        collected_context.append(content)
+        except Exception as e:
+            self.log(ctx, f"CS search failed: {e}", level="WARN")
+
+        # Phase 4 & 5: Synthesize
+        self.log(ctx, "Phase 4 & 5: Synthesizing CS findings...")
+        synthesis_prompt = f"Based on these sources:\n{collected_context}\n\nProvide 3 key CS technical findings. Output strict JSON: {{\"findings\": [\"finding1\", \"finding2\", \"finding3\"]}}"
+        res = self.llm.generate(prompt=synthesis_prompt, system_prompt=system_prompt + "\n\nYou MUST return ONLY valid JSON.")
+        
+        try:
+            if res.startswith("```json"): res = res[7:-3].strip()
+            elif res.startswith("```"): res = res[3:-3].strip()
+            data = ResearchFindings.model_validate_json(res)
+            ctx.research.cs_context = data.findings
+            with open(os.path.join(work_dir, "briefing.md"), "w") as f:
+                f.write(json.dumps(data.findings, indent=2))
+        except Exception:
+            ctx.research.cs_context = ["Fallback CS context generated due to parsing error."]
+            
+        self.log(ctx, f"CS General Research Protocol complete. Saved to {work_dir}")
 
 
 class ElectronicsAgent(BaseAgent):
@@ -221,12 +260,26 @@ class ElectronicsAgent(BaseAgent):
         super().__init__("ElectronicsAgent", layer=3, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Evaluating hardware interface abstractions and memory pipeline constraints...")
-        ctx.research.electronics_context = [
-            "Cache locality and memory alignment directly dictate real-world latency in high-throughput data buses.",
-            "Event-driven state machines minimize idle CPU cycles compared to polling loops."
-        ]
-        self.log(ctx, "ElectronicsAgent integrated hardware execution parameters.")
+        self.log(ctx, "Evaluating hardware interface abstractions via LLM + skill prompt...")
+        system_prompt = load_skill_prompt("system_architecture", fallback="generic")
+        hw = ctx.code_analysis.hardware_mappings
+        prompt = (
+            f"Topic: {ctx.raw_topic}\nHardware mappings: {hw}\n"
+            "Provide 3 concise electronics/hardware findings relevant to this system. "
+            'Output JSON: {"findings": ["...", "...", "..."]}'
+        )
+        res = self.llm.generate(prompt=prompt, system_prompt=system_prompt + "\nReturn ONLY valid JSON.")
+        try:
+            if res.startswith("```json"):
+                res = res[7:-3].strip()
+            elif res.startswith("```"):
+                res = res[3:-3].strip()
+            data = ResearchFindings.model_validate_json(res)
+            ctx.research.electronics_context = data.findings
+        except Exception:
+            ctx.research.electronics_context = []
+            self.log(ctx, "ElectronicsAgent LLM parse failed; leaving electronics_context empty.", level="WARN")
+        self.log(ctx, f"ElectronicsAgent findings: {len(ctx.research.electronics_context)}")
 
 
 class LiteratureAgent(BaseAgent):
@@ -234,28 +287,151 @@ class LiteratureAgent(BaseAgent):
         super().__init__("LiteratureAgent", layer=3, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Cross-referencing user notes and theoretical literature background...")
-        summary = ctx.research.literature_summary
-        self.log(ctx, f"LiteratureAgent processed user background context ({len(summary)} chars).")
+        self.log(ctx, "Starting Literature Review Protocol...")
+        topic = ctx.raw_topic
+        slug = topic.replace(" ", "_")[:20].lower()
+        work_dir = os.path.join(ctx.work_dir if hasattr(ctx, 'work_dir') else "./output", "litreview", slug)
+        os.makedirs(os.path.join(work_dir, "papers"), exist_ok=True)
+        
+        system_prompt = load_skill_prompt("litreview") + faculty_skill_addendum(
+            ctx.research.faculty_context or []
+        )
+        
+        # Phase 1: Framework Selection
+        self.log(ctx, "Phase 1: Selecting review framework (PICO/Decomposition)...")
+        framework_prompt = f"Select a review framework for: {topic}. Output JSON: {{\"framework\": \"Decomposition\", \"sub_areas\": [\"Problem\", \"Solution\"]}}"
+        fw_res = self.llm.generate(prompt=framework_prompt, system_prompt=system_prompt)
+        try:
+            if fw_res.startswith("```json"): fw_res = fw_res[7:-3].strip()
+            elif fw_res.startswith("```"): fw_res = fw_res[3:-3].strip()
+            fw_data = json.loads(fw_res)
+            sub_areas = fw_data.get("sub_areas", ["Overview"])
+        except Exception:
+            sub_areas = ["Background", "Methodology"]
+            
+        with open(os.path.join(work_dir, "framework.md"), "w") as f:
+            f.write(f"# Literature Framework\n" + "\n".join(f"- {sa}" for sa in sub_areas))
+
+        # Phase 2: Targeted Searches
+        self.log(ctx, "Phase 2 & 3: Targeted literature searches...")
+        collected_papers = []
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                for i, sa in enumerate(sub_areas):
+                    self.log(ctx, f"LitReview querying: {topic} {sa} research paper")
+                    results = list(ddgs.text(f"{topic} {sa} research paper", max_results=2))
+                    for j, r in enumerate(results):
+                        paper_id = f"paper_{i}_{j}"
+                        content = f"Title: {r.get('title')}\nURL: {r.get('href')}\nAbstract: {r.get('body')}"
+                        with open(os.path.join(work_dir, "papers", f"{paper_id}.md"), "w") as sf:
+                            sf.write(content)
+                        collected_papers.append(content)
+        except Exception as e:
+            self.log(ctx, f"LitReview search failed: {e}", level="WARN")
+
+        # Phase 3: Research Guide Synthesis
+        self.log(ctx, "Phase 4: Synthesizing Academic Literature Guide...")
+        synth_prompt = f"Synthesize these papers across the framework areas: {sub_areas}\n\nPapers:\n{collected_papers}\n\nOutput strict JSON: {{\"findings\": [\"Synthesis 1\", \"Synthesis 2\"]}}"
+        res = self.llm.generate(prompt=synth_prompt, system_prompt=system_prompt + "\n\nYou MUST return ONLY valid JSON.")
+        
+        try:
+            if res.startswith("```json"): res = res[7:-3].strip()
+            elif res.startswith("```"): res = res[3:-3].strip()
+            data = ResearchFindings.model_validate_json(res)
+            ctx.research.literature_context = data.findings
+            ctx.research.literature_summary = "\n".join(data.findings)
+            with open(os.path.join(work_dir, "research_guide.md"), "w") as f:
+                f.write(json.dumps(data.findings, indent=2))
+        except Exception:
+            self.log(ctx, "LitReview synthesis parsing failed.", level="WARN")
+            ctx.research.literature_context = []
+
+        self.log(ctx, f"LitReview Protocol complete. Artifacts saved in {work_dir}")
 
 
+import csv
 class GapFinder(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("GapFinder", layer=3, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Analyzing gaps between code analysis findings (Layer 2) and research literature (Layer 3)...")
-        bugs = ctx.code_analysis.bugs_edge_cases
-        algos = ctx.code_analysis.algorithms
+        self.log(ctx, "Starting Deep Research Protocol (Multi-Phase Loop)...")
+        topic = ctx.raw_topic
+        slug = topic.replace(" ", "_")[:20].lower()
+        
+        # Phase 1: Setup working directory
+        work_dir = os.path.join(ctx.work_dir if hasattr(ctx, 'work_dir') else "./output", "deep_research", slug)
+        os.makedirs(os.path.join(work_dir, "sources"), exist_ok=True)
+        os.makedirs(os.path.join(work_dir, "findings"), exist_ok=True)
+        
+        system_prompt = load_skill_prompt("deep_research") + faculty_skill_addendum(
+            ctx.research.faculty_context or []
+        )
+        
+        # Phase 2: Plan
+        self.log(ctx, "Phase 1 & 2: Reframing and Planning...")
+        plan_prompt = f"Create a research plan for topic: {topic}. Output ONLY valid JSON: {{\"scope\": \"...\", \"hypotheses\": [\"H1\", \"H2\"], \"search_queries\": [\"q1\", \"q2\"]}}"
+        plan_res = self.llm.generate(prompt=plan_prompt, system_prompt=system_prompt)
+        
+        search_queries = [f"{topic} missing research gaps"]
+        try:
+            if plan_res.startswith("```json"): plan_res = plan_res[7:-3].strip()
+            elif plan_res.startswith("```"): plan_res = plan_res[3:-3].strip()
+            plan_data = json.loads(plan_res)
+            with open(os.path.join(work_dir, "plan.md"), "w") as f:
+                f.write(f"# Plan\nScope: {plan_data.get('scope')}\nHypotheses: {plan_data.get('hypotheses')}")
+            search_queries = plan_data.get('search_queries', search_queries)[:2]
+        except Exception as e:
+            self.log(ctx, f"Plan JSON parsing error: {e}. Using fallback queries.")
+            
+        # Phase 3 & 4: Search and Sources
+        self.log(ctx, "Phase 3 & 4: Sourcing and Triangulation...")
+        sources_csv_path = os.path.join(work_dir, "sources.csv")
+        collected_context = []
+        
+        with open(sources_csv_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["ID", "Query", "Source_File"])
+            
+            try:
+                from duckduckgo_search import DDGS
+                with DDGS() as ddgs:
+                    for i, q in enumerate(search_queries):
+                        self.log(ctx, f"DeepResearch searching for: {q}")
+                        results = list(ddgs.text(q, max_results=2))
+                        for j, r in enumerate(results):
+                            source_id = f"source_{i}_{j}"
+                            source_file = os.path.join(work_dir, "sources", f"{source_id}.md")
+                            content = f"Title: {r.get('title')}\nURL: {r.get('href')}\nContent: {r.get('body')}"
+                            
+                            with open(source_file, "w") as sf:
+                                sf.write(content)
+                            
+                            writer.writerow([source_id, q, source_file])
+                            collected_context.append(content)
+            except Exception as e:
+                self.log(ctx, f"DeepResearch sub-search failed: {e}", level="WARN")
 
-        gaps = [
-            f"Gap 1: Absence of formal verification for '{algos[0]['name'] if algos else 'Pipeline'}' under high-concurrency memory limits.",
-            f"Gap 2: Unresolved edge-case handling in exception catching ({bugs[0]['issue'] if bugs else 'boundary checks'}), requiring defensive agent guardrails.",
-            "Gap 3: Opportunity to optimize Big-O complexity through hybrid asynchronous event bus streaming."
-        ]
-
-        ctx.research.novelty_gaps = gaps
-        self.log(ctx, f"GapFinder uncovered {len(gaps)} novelty gaps for the research paper outline.")
+        # Phase 5 & 6: Synthesis and Findings (JSON Output)
+        self.log(ctx, "Phase 5 & 6: Synthesizing novelty gaps...")
+        synthesis_prompt = f"Based on the planned hypotheses and these collected sources:\n{collected_context}\n\nIdentify 3 novel research gaps. Output strict JSON: {{\"findings\": [\"gap1\", \"gap2\"]}}"
+        res = self.llm.generate(prompt=synthesis_prompt, system_prompt=system_prompt + "\n\nYou MUST return ONLY valid JSON.")
+        
+        try:
+            if res.startswith("```json"): res = res[7:-3].strip()
+            elif res.startswith("```"): res = res[3:-3].strip()
+            data = ResearchFindings.model_validate_json(res)
+            ctx.research.novelty_gaps = data.findings
+            
+            with open(os.path.join(work_dir, "findings", "gaps.md"), "w") as f:
+                f.write(json.dumps(data.findings, indent=2))
+                
+        except Exception as e:
+            self.log(ctx, f"GapFinder Synthesis JSON error: {e}")
+            ctx.research.novelty_gaps = ["Gap 1: Missing formal verification.", "Gap 2: Unresolved edge cases."]
+            
+        self.log(ctx, f"Deep Research Protocol complete. All artifacts logically saved in {work_dir}")
 
 class WebSearchAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
@@ -274,11 +450,91 @@ class WebSearchAgent(BaseAgent):
                 for r in ddgs.text(query, max_results=5):
                     results.append(f"Source: {r.get('title')} ({r.get('href')})\nSnippet: {r.get('body')}")
             
-            if not hasattr(ctx.research, 'web_context'):
-                ctx.research.web_context = []
-                
             ctx.research.web_context.extend(results)
             self.log(ctx, f"Successfully retrieved {len(results)} live web search results.")
             
         except Exception as e:
-            self.log(ctx, f"Live Web search failed: {e}. Falling back to domain context.", level="WARN")
+            self.log(ctx, f"Live Web search failed: {e}.", level="WARN")
+
+class FacultyProfileAgent(BaseAgent):
+    """Loads institutional faculty JSON into ctx.research.faculty_context (LangGraph node).
+
+    Does not invent profiles. Pre-build JSON via process_faculty / fetch_faculty (OpenAlex).
+    """
+
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("FacultyProfileAgent", layer=3, bus=bus)
+
+    def run(self, ctx: PipelineContext) -> None:
+        self.log(ctx, "Loading faculty profiles for institutional grounding...")
+        profiles_dir = os.path.join(
+            getattr(ctx, "work_dir", None) or "./output", "faculty_profiles"
+        )
+        if not os.path.exists(profiles_dir):
+            self.log(
+                ctx,
+                "No faculty_profiles/ found. Optional pre-step: python src/utils/fetch_faculty.py",
+                level="INFO",
+            )
+            return
+
+        loaded = 0
+        for filename in os.listdir(profiles_dir):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(profiles_dir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                summary = f"Profile: {data.get('faculty_name', '')} ({data.get('department', '')})\n"
+                summary += f"Domains: {', '.join(data.get('primary_domains', []))}\n"
+                summary += f"Interdisciplinary Overlap: {data.get('interdisciplinary_summary', '')}\n"
+                if "collaboration_matrix" in data:
+                    summary += (
+                        f"Synergy: {data['collaboration_matrix'].get('synergy_description', '')}\n"
+                    )
+                if summary not in ctx.research.faculty_context:
+                    ctx.research.faculty_context.append(summary)
+                    loaded += 1
+            except Exception as e:
+                self.log(ctx, f"Failed to load faculty profile {filename}: {e}", level="WARN")
+
+        self.log(ctx, f"FacultyProfileAgent loaded {loaded} profile(s).")
+
+
+class ResearchOrchestrator(BaseAgent):
+    """Executes Layer 3 research agents sequentially (thread-safe ctx writes)."""
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("ResearchOrchestrator", layer=3, bus=bus)
+        self.arxiv_agent = ArXivAgent(bus)
+        self.web_agent = WebSearchAgent(bus)
+        self.cs_agent = CSAgent(bus)
+        self.electronics_agent = ElectronicsAgent(bus)
+        self.lit_agent = LiteratureAgent(bus)
+        self.gap_finder = GapFinder(bus)
+        self.faculty_agent = FacultyProfileAgent(bus)
+
+    def run(self, ctx: PipelineContext) -> None:
+        self.log(ctx, "Initializing Layer 3 Research Execution (sequential, merge-safe)...")
+
+        # Faculty may already be loaded by LangGraph faculty node; load if empty
+        if not ctx.research.faculty_context:
+            self.faculty_agent.run(ctx)
+        elif ctx.research.faculty_context:
+            self.log(ctx, f"Using {len(ctx.research.faculty_context)} preloaded faculty profiles.")
+
+        for agent in (
+            self.arxiv_agent,
+            self.web_agent,
+            self.cs_agent,
+            self.electronics_agent,
+            self.lit_agent,
+            self.gap_finder,
+        ):
+            try:
+                agent.run(ctx)
+            except Exception as e:
+                self.log(ctx, f"{agent.name} failed: {e}", level="WARN")
+                ctx.errors.append(f"L3 {agent.name}: {e}")
+
+        self.log(ctx, "Layer 3 Research Execution Complete.")

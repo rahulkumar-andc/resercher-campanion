@@ -155,7 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => checkJobStatus(jobId), 3000);
   }
 
-  // --- Exact 27-Agent Neural Topology (D3.js Implementation) ---
+  // --- Exact 31-Agent Neural Topology (D3.js Implementation) ---
   const d3Container = d3.select("#d3-nn-container");
   const width = d3Container.node().getBoundingClientRect().width;
   const height = 400;
@@ -172,7 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
     { layer: 0, name: 'L0: Profiler', agents: ['RPA'], type: 'profiler' },
     { layer: 1, name: 'L1: Input', agents: ['GI', 'CI', 'DI', 'SA', 'QP'], type: 'mamba' },
     { layer: 2, name: 'L2: Analysis', agents: ['CB', 'AD', 'CA', 'HM', 'BE'], type: 'transformer' },
-    { layer: 3, name: 'L3: Grounding', agents: ['WSA', 'AA', 'CSA', 'EA', 'LA', 'GF'], type: 'mamba' },
+    { layer: 3, name: 'L3: Grounding', agents: ['WSA', 'AA', 'CSA', 'EA', 'LA', 'GF', 'FPA'], type: 'mamba' },
     { layer: 4, name: 'L4: Synthesis', agents: ['Conn', 'OB', 'Cit', 'Crit'], type: 'transformer' },
     { layer: 4.5, name: 'L4.5: Audit', agents: ['PC', 'PR', 'AI', 'PRV', 'FQA'], type: 'transformer' },
     { layer: 5, name: 'L5: Output', agents: ['WA', 'PDF', 'PPT'], type: 'mamba' },

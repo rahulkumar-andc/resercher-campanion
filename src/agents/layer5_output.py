@@ -1,25 +1,39 @@
 import os
+import json
+import re
+import concurrent.futures
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext
+from src.core.skills_loader import load_skill_prompt
 from src.exporters.bibtex_exporter import BibTeXExporter
 from src.exporters.pdf_exporter import PDFExporter
 from src.exporters.pptx_exporter import PPTXExporter
+from src.core.llm_client import LocalLLMClient, cloud_write_completion
+from src.core.humanizer import RegexFilter
 
+class SectionOutput(BaseModel):
+    content: str = Field(..., description="The markdown content for the section.")
+    citations: List[str] = Field(default_factory=list, description="List of citations used in this section.")
 
-def load_skill_prompt(skill_name: str) -> str:
-    """Load the system prompt from the corresponding skill file."""
-    skill_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills", f"{skill_name}.md")
-    if not os.path.exists(skill_path):
-        skill_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills", "generic.md")
-    try:
-        with open(skill_path, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except FileNotFoundError:
+class CriticFeedback(BaseModel):
+    approved: bool = Field(..., description="Whether the content is approved.")
+    feedback: str = Field(..., description="Specific feedback or corrections needed.")
+
+def _style_hint(ctx: PipelineContext) -> str:
+    fp = ctx.style_fingerprint or {}
+    if not fp:
         return ""
+    tone = fp.get("academic_tone") or fp.get("tone") or "formal academic"
+    length = fp.get("sentence_length") or "balanced"
+    return f"\nSTYLE FINGERPRINT: tone={tone}; sentence_length={length}. Match this voice.\n"
 
-def _generate_section_content(agent: BaseAgent, ctx: PipelineContext, section_name: str, section_topics: str, skill_name: str, user_existing_text: str = None) -> str:
-    system_prompt = load_skill_prompt(skill_name)
+def _generate_section_content(agent: BaseAgent, ctx: PipelineContext, section_name: str, section_topics: str, skill_name: str, user_existing_text: str = None) -> SectionOutput:
+    system_prompt = load_skill_prompt(skill_name, fallback="generic")
+    system_prompt += _style_hint(ctx)
+    system_prompt += "\n\nCRITICAL: You MUST output ONLY valid JSON conforming to this schema:\n{\"content\": \"markdown text here\", \"citations\": [\"author2024\"]}"
     topic = ctx.raw_topic
     unified_context = ctx.synthesis.unified_context if hasattr(ctx.synthesis, 'unified_context') else "No deep context available."
     
@@ -63,103 +77,127 @@ REQUIREMENTS:
 
 {section_name}:"""
 
-    import requests
     import os
-    
-    api_key = os.environ.get("CLOUD_LLM_API_KEY")
-    if not api_key:
-        try:
-            with open(".env", "r") as f:
-                for line in f:
-                    if line.startswith("CLOUD_LLM_API_KEY="):
-                        api_key = line.strip().split("=", 1)[1]
-                        break
-        except Exception:
-            pass
 
-    if api_key:
+    # Writing-only cloud path; research/QA agents never call this helper.
+    content_str = cloud_write_completion(system_prompt, section_prompt)
+    if content_str:
         try:
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "mistral-large-latest",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": section_prompt}
-                ],
-                "temperature": 0.2,
-                "max_tokens": 4000
-            }
-            resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=180)
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"]
-            else:
-                agent.log(ctx, f"Cloud API Error on {section_name}: {resp.status_code}. Skipping.", level="WARN")
+            if content_str.startswith("```json"):
+                content_str = content_str[7:-3].strip()
+            elif content_str.startswith("```"):
+                content_str = content_str[3:-3].strip()
+            return SectionOutput.model_validate_json(content_str)
         except Exception as e:
-            agent.log(ctx, f"Deep synthesis failed: {e}. Falling back to single-pass.", level="WARN")
+            agent.log(ctx, f"Cloud writing JSON parse failed on {section_name}: {e}. Local fallback.", level="WARN")
+    else:
+        agent.log(ctx, f"Cloud writing unavailable for {section_name}; using local LLM.", level="INFO")
 
     fallback_prompt = f"{system_prompt}\n\n{section_prompt}"
-    return agent.llm.generate(prompt=fallback_prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
+    res_str = agent.llm.generate(prompt=fallback_prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
+    if res_str.startswith("```json"): res_str = res_str[7:-3].strip()
+    elif res_str.startswith("```"): res_str = res_str[3:-3].strip()
+    try:
+        return SectionOutput.model_validate_json(res_str)
+    except:
+        return SectionOutput(content=res_str, citations=[])
 
 # --- EXPLICIT 8-10 SECTION AGENTS ---
 
 class AbstractAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("AbstractAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Abstract...")
         return _generate_section_content(self, ctx, "Abstract", section_topics, "abstract", user_existing_text)
 
 class IntroductionAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("IntroductionAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Introduction...")
         return _generate_section_content(self, ctx, "Introduction", section_topics, "introduction", user_existing_text)
 
 class LiteratureReviewAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("LiteratureReviewAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Literature Review...")
         return _generate_section_content(self, ctx, "Literature Review", section_topics, "literature_review", user_existing_text)
 
 class MethodologyAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("MethodologyAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Proposed Method / Methodology...")
         return _generate_section_content(self, ctx, "Proposed Method / Methodology", section_topics, "methodology", user_existing_text)
 
 class ResultsAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("ResultsAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Results...")
         return _generate_section_content(self, ctx, "Results", section_topics, "results", user_existing_text)
 
 class DiscussionAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("DiscussionAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Discussion...")
         return _generate_section_content(self, ctx, "Discussion", section_topics, "discussion", user_existing_text)
 
 class ConclusionAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("ConclusionAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, "Drafting Conclusion...")
         return _generate_section_content(self, ctx, "Conclusion", section_topics, "conclusion", user_existing_text)
+
+class SystemArchitectureAgent(BaseAgent):
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("SystemArchitectureAgent", layer=5, bus=bus)
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
+        self.log(ctx, "Drafting System Architecture...")
+        return _generate_section_content(self, ctx, "System Architecture", section_topics, "system_architecture", user_existing_text)
+
+class AlgorithmAgent(BaseAgent):
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("AlgorithmAgent", layer=5, bus=bus)
+    def run(self, ctx: PipelineContext, section_topics: str, user_existing_text: str = None) -> SectionOutput:
+        self.log(ctx, "Drafting Algorithm / Flowchart...")
+        return _generate_section_content(self, ctx, "Algorithm / Flowchart", section_topics, "algorithm", user_existing_text)
 
 class GenericSectionAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("GenericSectionAgent", layer=5, bus=bus)
-    def run(self, ctx: PipelineContext, section_name: str, section_topics: str, user_existing_text: str = None) -> str:
+    def run(self, ctx: PipelineContext, section_name: str, section_topics: str, user_existing_text: str = None) -> SectionOutput:
         self.log(ctx, f"Drafting {section_name}...")
         return _generate_section_content(self, ctx, section_name, section_topics, "generic", user_existing_text)
+
+class CriticAgent(BaseAgent):
+    def __init__(self, bus: SupervisorBus):
+        super().__init__("CriticAgent", layer=5, bus=bus)
+    def run(self, ctx: PipelineContext, section_name: str, output: SectionOutput) -> CriticFeedback:
+        self.log(ctx, f"Critic Agent validating {section_name}...")
+        
+        system_prompt = load_skill_prompt("critic")
+        system_prompt += "\n\nCRITICAL: You are validating an academic paper section. You MUST output ONLY valid JSON conforming to this schema:\n{\"approved\": true/false, \"feedback\": \"detailed feedback here\"}"
+        
+        review_prompt = f"Review the following {section_name} section for academic rigor, logic, and style:\n\n{output.content}\n\nProvide your JSON verdict:"
+        
+        res_str = self.llm.generate(prompt=review_prompt, system_prompt=system_prompt, temperature=0.2, max_tokens=1000)
+        
+        if res_str.startswith("```json"): res_str = res_str[7:-3].strip()
+        elif res_str.startswith("```"): res_str = res_str[3:-3].strip()
+        
+        try:
+            feedback = CriticFeedback.model_validate_json(res_str)
+            return feedback
+        except Exception as e:
+            self.log(ctx, f"Critic JSON parsing failed: {e}. Defaulting to manual logic.", level="WARN")
+            if len(output.content) < 50:
+                return CriticFeedback(approved=False, feedback="Content too short (fallback).")
+            return CriticFeedback(approved=True, feedback="Fallback approval.")
 
 # --- THE ORCHESTRATOR ---
 
@@ -174,80 +212,178 @@ class WriterAgent(BaseAgent):
             "Proposed Method / Methodology": MethodologyAgent(bus),
             "Results": ResultsAgent(bus),
             "Discussion": DiscussionAgent(bus),
-            "Conclusion": ConclusionAgent(bus)
+            "Conclusion": ConclusionAgent(bus),
+            "System Architecture": SystemArchitectureAgent(bus),
+            "Algorithm / Flowchart": AlgorithmAgent(bus)
         }
         self.generic_agent = GenericSectionAgent(bus)
 
     def run(self, ctx: PipelineContext, output_dir: str = "./output") -> None:
-        self.log(ctx, "Drafting full manuscript markdown using autonomous LLM synthesis...")
+        self.log(ctx, "Drafting manuscript (respecting job_mode / writer_mode)...")
         topic = ctx.raw_topic
-        outline = ctx.synthesis.outline
-        
-        target_section = getattr(ctx, 'target_section', None)
-        user_existing_text = getattr(ctx, 'user_existing_text', None)
-        
-        if target_section:
-            self.log(ctx, f"Targeted generation requested for section: {target_section}")
-            
+        outline = ctx.synthesis.outline or []
+        mode = (ctx.job_mode or "full_paper").lower()
+        writer_mode = (ctx.writer_mode or "multi").lower()
+        draft = (ctx.draft_text or "").strip()
+        target_section = ctx.target_section
+        user_existing_text = draft if draft else None
+
+        # --- complete_draft: continue half paper with one writer ---
+        if mode == "complete_draft" and draft:
+            self.log(ctx, "complete_draft mode: single writer continuing user manuscript...")
+            agent_key = (ctx.selected_writers[0] if ctx.selected_writers else None)
+            section_topics = f"Complete and polish the draft for topic: {topic}"
+            if agent_key and agent_key in self.agents:
+                out = self.agents[agent_key].run(ctx, section_topics, draft)
+            else:
+                out = self.generic_agent.run(
+                    ctx,
+                    "Manuscript Continuation",
+                    section_topics,
+                    draft,
+                )
+            continuation = out.content or ""
+            # Avoid duplicating if model echoed the draft
+            if continuation.strip().startswith(draft[:80]):
+                ctx.output.markdown_manuscript = continuation
+            else:
+                ctx.output.markdown_manuscript = draft.rstrip() + "\n\n" + continuation
+            self._finalize_exports(ctx, output_dir)
+            return
+
+        # --- research_only: one research findings report ---
+        if mode == "research_only":
+            self.log(ctx, "research_only mode: synthesizing findings report...")
+            findings = ctx.synthesis.unified_context or ""
+            gaps = "\n".join(f"- {g}" for g in (ctx.research.novelty_gaps or []))
+            lit = "\n".join(f"- {x}" for x in (ctx.research.literature_context or [])[:8])
+            papers = "\n".join(
+                f"- {p.title} ({p.year}) {p.url}" for p in (ctx.research.arxiv_papers or [])[:8]
+            )
+            section_topics = (
+                f"Summarize research findings for '{topic}'. "
+                f"Gaps:\n{gaps}\nLiterature:\n{lit}\nPapers:\n{papers}\nContext:\n{findings[:6000]}"
+            )
+            out = self.generic_agent.run(ctx, "Research Findings", section_topics, None)
+            ctx.output.markdown_manuscript = f"# Research Findings: {topic}\n\n{out.content}\n"
+            self._finalize_exports(ctx, output_dir)
+            return
+
+        # --- targeted single section (legacy + literature_review default) ---
+        if target_section or (mode == "literature_review" and writer_mode == "single"):
+            section = target_section or "Literature Review"
+            self.log(ctx, f"Targeted generation for section: {section}")
             section_topics = ""
             for s in outline:
-                if s['section'] == target_section:
-                    section_topics = ", ".join(s['topics'])
+                base = re.sub(r"^\d+\.\s*", "", s["section"]).strip()
+                if base == section or s["section"] == section:
+                    section_topics = ", ".join(s["topics"])
                     break
-                    
-            if target_section in self.agents:
-                content = self.agents[target_section].run(ctx, section_topics, user_existing_text)
+            if not section_topics:
+                section_topics = f"Literature review on {topic}"
+            if section in self.agents:
+                out = self.agents[section].run(ctx, section_topics, user_existing_text)
             else:
-                content = self.generic_agent.run(ctx, target_section, section_topics, user_existing_text)
-            
+                # strip number prefix match
+                matched = None
+                for key in self.agents:
+                    if key.lower() == section.lower():
+                        matched = key
+                        break
+                if matched:
+                    out = self.agents[matched].run(ctx, section_topics, user_existing_text)
+                else:
+                    out = self.generic_agent.run(ctx, section, section_topics, user_existing_text)
             if user_existing_text:
-                final_content = user_existing_text + " " + content
+                final_content = user_existing_text + "\n\n" + out.content
             else:
-                final_content = content
-                
-            ctx.output.markdown_manuscript = f"## {target_section}\n\n{final_content}"
-            self.log(ctx, f"Targeted generation for {target_section} completed ({len(ctx.output.markdown_manuscript)} chars).")
+                final_content = out.content
+            ctx.output.markdown_manuscript = f"## {section}\n\n{final_content}"
+            self._finalize_exports(ctx, output_dir)
             return
-            
-        self.log(ctx, "Initiating DEEP MULTI-PASS ACADEMIC SYNTHESIS with specialized agents...")
-        
-        full_manuscript = f"# {topic}\n\n"
-        
-        for section_dict in outline:
-            section_title = section_dict['section']
-            section_topics = ", ".join(section_dict['topics'])
-            
-            import re
-            base_title = re.sub(r'^\d+\.\s*', '', section_title).strip()
-            
-            if base_title in self.agents:
-                section_content = self.agents[base_title].run(ctx, section_topics, user_existing_text=None)
+
+        # --- single writer for whole outline (one agent only) ---
+        if writer_mode == "single":
+            agent_key = ctx.selected_writers[0] if ctx.selected_writers else None
+            self.log(ctx, f"single writer mode: agent={agent_key or 'GenericSectionAgent'}")
+            topics_blob = "; ".join(
+                f"{s['section']}: {', '.join(s['topics'])}" for s in outline
+            )
+            prompt_topics = f"Write a cohesive paper covering: {topics_blob}"
+            if agent_key and agent_key in self.agents:
+                out = self.agents[agent_key].run(ctx, prompt_topics, user_existing_text)
+                title = agent_key
             else:
-                section_content = self.generic_agent.run(ctx, section_title, section_topics, user_existing_text=None)
-            
-            full_manuscript += f"\n\n## {section_title}\n\n{section_content}"
-            
-        self.log(ctx, "Multi-agent synthesis completed successfully.")
+                out = self.generic_agent.run(ctx, "Full Paper", prompt_topics, user_existing_text)
+                title = "Full Paper"
+            body = out.content
+            if user_existing_text:
+                body = user_existing_text.rstrip() + "\n\n" + body
+            ctx.output.markdown_manuscript = f"# {topic}\n\n## {title}\n\n{body}\n"
+            self._finalize_exports(ctx, output_dir)
+            return
 
-        # Format Final Document
+        # --- multi section agents (default full_paper / literature with multi) ---
+        self.log(ctx, "Multi-agent section synthesis...")
+        full_manuscript = f"# {topic}\n\n"
+        critic = CriticAgent(self.bus)
+
+        def generate_and_critique(section_dict):
+            section_title = section_dict["section"]
+            section_topics = ", ".join(section_dict["topics"])
+            base_title = re.sub(r"^\d+\.\s*", "", section_title).strip()
+
+            if base_title in self.agents:
+                out = self.agents[base_title].run(ctx, section_topics, None)
+            else:
+                out = self.generic_agent.run(ctx, section_title, section_topics, None)
+
+            feedback = critic.run(ctx, base_title, out)
+            if not feedback.approved:
+                self.log(ctx, f"Critic rejected {base_title}: {feedback.feedback}", level="WARN")
+            return section_title, out.content
+
+        sections = outline
+        if ctx.selected_writers:
+            wanted = {w.strip().lower() for w in ctx.selected_writers}
+            sections = [
+                s
+                for s in outline
+                if re.sub(r"^\d+\.\s*", "", s["section"]).strip().lower() in wanted
+            ] or outline
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, max(1, len(sections)))) as executor:
+            futures = [executor.submit(generate_and_critique, s) for s in sections]
+            for future in futures:
+                title, content = future.result()
+                full_manuscript += f"\n\n## {title}\n\n{content}"
+
         md_content = full_manuscript + "\n\n"
-
-        # Inject DataViz Mermaid diagrams if available
-        if hasattr(ctx.synthesis, 'diagrams') and ctx.synthesis.diagrams:
+        if ctx.synthesis.diagrams:
             md_content += "### Appendix: System Architecture & Data Flow\n\n"
             for diagram in ctx.synthesis.diagrams:
                 md_content += f"{diagram}\n\n"
 
         ctx.output.markdown_manuscript = md_content
-        
-        # Export BibTeX references & markdown file
+        if ctx.style_fingerprint:
+            try:
+                ctx.output.markdown_manuscript = RegexFilter().filter(md_content)
+                self.log(ctx, "Applied style RegexFilter humanizer pass.")
+            except Exception as e:
+                self.log(ctx, f"Humanizer skipped: {e}", level="WARN")
+
+        self._finalize_exports(ctx, output_dir)
+
+    def _finalize_exports(self, ctx: PipelineContext, output_dir: str) -> None:
         try:
             bib_path = BibTeXExporter.export(ctx, output_dir)
             self.log(ctx, f"WriterAgent exported BibTeX bibliography to: {bib_path}")
         except Exception as e:
             self.log(ctx, f"BibTeX export failed: {e}", level="WARN")
-
-        self.log(ctx, f"WriterAgent completed Markdown manuscript ({len(md_content)} chars).")
+        self.log(
+            ctx,
+            f"WriterAgent completed Markdown manuscript ({len(ctx.output.markdown_manuscript or '')} chars).",
+        )
 
 
 

@@ -61,6 +61,9 @@ class ResearchGroundingResult:
     arxiv_papers: List[CitationItem] = field(default_factory=list)
     cs_context: List[str] = field(default_factory=list)
     electronics_context: List[str] = field(default_factory=list)
+    faculty_context: List[str] = field(default_factory=list)
+    literature_context: List[str] = field(default_factory=list)
+    web_context: List[str] = field(default_factory=list)
     literature_summary: str = ""
     novelty_gaps: List[str] = field(default_factory=list)
 
@@ -72,20 +75,25 @@ class SynthesisResult:
     citations: List[CitationItem] = field(default_factory=list)
     critic_score: float = 0.0
     critic_feedback: List[str] = field(default_factory=list)
+    diagrams: List[str] = field(default_factory=list)
 
 
 @dataclass
 class QualityAuditResult:
-    plagiarism_percentage: float = 0.0
-    ai_writing_percentage: float = 0.0
+    plagiarism_percentage: Optional[float] = None
+    ai_writing_percentage: Optional[float] = None
     reviewer_answers: Dict[str, str] = field(default_factory=dict)
     grammar_spelling_issues: List[str] = field(default_factory=list)
     format_issues: List[str] = field(default_factory=list)
-    is_approved: bool = True
+    is_approved: bool = False
     feedback_reroute_target: Optional[str] = None
     rejection_reasons: List[str] = field(default_factory=list)
-    upskill_accuracy_score: float = 95.0
+    upskill_accuracy_score: Optional[float] = None
     upskill_metrics: Dict[str, float] = field(default_factory=dict)
+    qa_method: str = "local_heuristic"
+    is_estimate: bool = True
+    plagiarism_method: str = "local_ngram_heuristic"
+    ai_method: str = "local_style_heuristic"
 
 
 
@@ -105,16 +113,29 @@ class PipelineContext:
     raw_notes_paths: List[str] = field(default_factory=list)
     style_fingerprint: Dict[str, Any] = field(default_factory=dict)
     subtopics: List[str] = field(default_factory=list)
-    
+
+    # Dashboard / job options
+    job_mode: str = "full_paper"  # full_paper | literature_review | research_only | complete_draft
+    github_url: Optional[str] = None
+    writer_mode: str = "multi"  # multi | single
+    selected_writers: List[str] = field(default_factory=list)  # e.g. ["Literature Review"]; empty = all / generic
+    draft_text: str = ""  # half-written paper for complete_draft
+    target_section: Optional[str] = None
+    skip_code_analysis: bool = False
+
     stage: PipelineStage = PipelineStage.IDLE
     code_analysis: CodeAnalysisResult = field(default_factory=CodeAnalysisResult)
     research: ResearchGroundingResult = field(default_factory=ResearchGroundingResult)
     synthesis: SynthesisResult = field(default_factory=SynthesisResult)
     quality_audit: QualityAuditResult = field(default_factory=QualityAuditResult)
     output: OutputResult = field(default_factory=OutputResult)
-    
+
     logs: List[AgentMessage] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     start_time: float = field(default_factory=time.time)
     end_time: Optional[float] = None
+    # Live progress (dashboard)
+    current_agent: str = ""
+    progress_pct: float = 0.0
+    eta_seconds: Optional[float] = None
 

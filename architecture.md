@@ -1,214 +1,103 @@
-# Autonomous Research Companion — System Architecture
+# Autonomous Research Companion (ARC) — Architecture
 
 ## Overview
-The Autonomous Research Companion is a 6-layer multi-agent system designed to transform raw code, unstructured notes/PDFs, and high-level research topics into fully-formatted research papers (PDF) and presentations (PPTX).
+ARC is a **LangGraph-orchestrated multi-agent pipeline** that turns source code, notes/PDFs, and a research topic into a markdown manuscript, PDF, PPTX, and BibTeX. Quality scores are **local heuristics (approximate)** — not commercial plagiarism/AI detectors.
 
----
-
-## Architecture Flowchart
+## Pipeline (actual graph order)
 
 ```mermaid
 flowchart TD
-    %% Define Styles
-    classDef supervisor fill:#8e44ad,stroke:#5b2c6f,color:white,stroke-width:4px;
-    classDef l1 fill:#3498db,stroke:#2980b9,color:white;
-    classDef l2 fill:#e74c3c,stroke:#c0392b,color:white;
-    classDef l3 fill:#2ecc71,stroke:#27ae60,color:white;
-    classDef l4 fill:#f39c12,stroke:#d68910,color:white;
-    classDef l45 fill:#d35400,stroke:#a04000,color:white;
-    classDef l5 fill:#34495e,stroke:#2c3e50,color:white;
-    classDef io fill:#95a5a6,stroke:#7f8c8d,color:black,stroke-dasharray: 5 5;
-    
-    %% Inputs (User Data)
-    subgraph IODisks [User Input Sources]
-        direction LR
-        RawCode[(Raw Source Code)]:::io
-        RawNotes[(PDFs & User Notes)]:::io
-        RawTopic[(Topic String)]:::io
-    end
-    
-    %% Central Hub / Brain (Event Bus)
-    Sup((Layer 6: Supervisor Agent\nCentral Event Bus & Router)):::supervisor
-
-    %% LAYER 1: INPUT & PARSING
-    subgraph Layer1 [Layer 1: Input & Parsing]
-        direction LR
-        GI(Git Ingestor):::l1
-        CI(Code Ingestor):::l1
-        DI(Data Ingestor):::l1
-        SA(Style Agent):::l1
-        QP(Query Parser):::l1
-    end
-    
-    %% LAYER 2: CODE ANALYSIS
-    subgraph Layer2 [Layer 2: Code Analysis]
-        direction LR
-        CB(Code Breaker):::l2
-        AD(Algo Detector):::l2
-        CA(Complexity Analyzer):::l2
-        HM(HW Mapper):::l2
-        BE(Bug & Edge Case):::l2
-    end
-    
-    %% LAYER 3: RESEARCH & GROUNDING
-    subgraph Layer3 [Layer 3: Research & Grounding]
-        direction LR
-        WSA(Web Search):::l3
-        AA(ArXiv Agent):::l3
-        CSA(CS Agent):::l3
-        EA(Electronics Agent):::l3
-        LA(Literature Agent):::l3
-        GF(Gap Finder):::l3
-    end
-    
-    %% LAYER 4: SYNTHESIS & STRUCTURE
-    subgraph Layer4 [Layer 4: Synthesis & Structure]
-        direction LR
-        Conn(Connector):::l4
-        OB(Outline Builder):::l4
-        Cit(Citation Agent):::l4
-        Crit(Critic Agent):::l4
-    end
-
-    %% LAYER 4.5: QUALITY AUDIT & PEER REVIEW
-    subgraph Layer45 [Layer 4.5: Quality Audit & Peer Review]
-        direction LR
-        PC(Plagiarism Checker):::l45
-        PR(Plagiarism Remediator):::l45
-        AI(AI Percentage Auditor):::l45
-        PRV(Peer Reviewer Agent):::l45
-        FQA(Format Quality Auditor):::l45
-    end
-    
-    %% LAYER 5: OUTPUT GENERATION
-    subgraph Layer5 [Layer 5: Output Generation]
-        direction LR
-        WA(Writer Agent):::l5
-        PDF(PDF Exporter):::l5
-        PPT(PPT Exporter):::l5
-    end
-    
-    %% Outputs (Deliverables)
-    subgraph Deliverables [Final Export]
-        direction LR
-        OutPDF[(ResearchPaper.pdf)]:::io
-        OutPPT[(Presentation.pptx)]:::io
-        OutBIB[(References.bib)]:::io
-    end
-
-    %% --- FULLY CONNECTED WIRES & DATA FLOW ---
-
-    %% 1. Input Source Wires -> Layer 1 Agents
-    RawCode -->|"Raw Files"| CI
-    RawNotes -->|"Text & Metadata"| DI
-    RawNotes -->|"Style Samples"| SA
-    RawTopic -->|"Topic String"| QP
-
-    %% 2. Layer 1 -> Layer 2 & 3 Wires
-    CI -->|"AST Trees & Tokens"| CB & AD & CA & HM & BE
-    DI -->|"Parsed JSON Notes"| LA
-    QP -->|"Sub-queries"| AA & CSA & EA
-    SA -->|"Style Fingerprint"| WA
-
-    %% 3. Layer 2 Code Analysis Wires -> Layer 3 & 4
-    CB -->|"Function Blocks"| AA
-    AD -->|"Algorithm Types"| CSA
-    CA -->|"Big-O Metrics"| Conn
-    HM -->|"Hardware Specs"| EA
-    BE -->|"Code Weaknesses"| GF
-
-    %% 4. Layer 3 Research Wires -> Layer 4 Synthesis
-    AA -->|"BibTeX & Papers"| Cit & Conn
-    CSA -->|"CS Benchmarks"| Conn
-    EA -->|"Circuit Specs"| Conn
-    LA -->|"Background Knowledge"| Conn
-    GF -->|"Identified Research Gaps"| OB
-
-    %% 5. Layer 4 Synthesis Wires -> Layer 5 Writer
-    Conn -->|"Unified Context"| WA
-    OB -->|"Section Outlines"| WA
-    Cit -->|"IEEE/ACM References"| WA
-    WA <-->|"Draft Review & Feedback"| Crit
-
-    %% 6. Layer 5 Writer -> Layer 4.5 Quality Audit Wires
-    WA -->|"Draft Manuscript"| PC & AI & PRV & FQA
-
-    %% 7. Layer 4.5 Self-Healing Feedback Loop Wires
-    PC -.->|"Similarity > 15%"| PR
-    AI -.->|"AI Score > 10%"| PR
-    PR -.->|"Re-synthesized Text"| WA
-    PRV -.->|"Reviewer Questions"| OB
-    FQA -.->|"Grammar Fixes"| WA
-
-    %% 8. Approved QA -> Exporters & Deliverables
-    PC & AI & PRV & FQA -->|"Quality Approved"| PDF & PPT & Cit
-    PDF -->|"Rendered PDF"| OutPDF
-    PPT -->|"Rendered Deck"| OutPPT
-    Cit -->|"BibTeX Export"| OutBIB
-
-    %% 9. Layer 6 Supervisor Event Bus Monitoring (All Agents)
-    Sup <.-> GI & CI & DI & SA & QP
-    Sup <.-> CB & AD & CA & HM & BE
-    Sup <.-> WSA & AA & CSA & EA & LA & GF
-    Sup <.-> Conn & OB & Cit & Crit
-    Sup <.-> PC & PR & AI & PRV & FQA
-    Sup <.-> WA & PDF & PPT
+  startNode[START] --> ingest[L0_L1_Ingest]
+  ingest --> research[L2_L3_Research]
+  research --> synth[L4_Connector_Outline_Citation]
+  synth --> draftCritic[L4_PreWrite_Critic]
+  draftCritic --> writer[L5_Writer]
+  writer --> qa[L45_Heuristic_QA]
+  qa -->|fail_retries_left| remediate[Remediate_then_Writer]
+  qa -->|pass_or_max_retries| export[PDF_PPT_Eval]
+  remediate --> writer
+  export --> endNode[END]
 ```
 
----
+**Critical rule:** Layer 4.5 QA runs **after** the Writer, on `markdown_manuscript`. Remediator rewrites text only and **cannot force-approve**; scores are recomputed on the next QA pass (max 2 remediation loops).
 
-## Layer Breakdown
+## Layers
 
-### Layer 6: LangGraph Neural Orchestrator (`SupervisorAgent`)
-- **StateGraph & MemorySaver**: Manages the overarching `ResearchState` utilizing LangGraph. Enables thread-level checkpointing for fault-tolerance, dynamic conditional routing (self-healing), and Human-in-the-Loop (HITL) pause-resume execution.
-- **Asynchronous Execution**: Executes Layer 2 and Layer 3 research agents simultaneously via `asyncio.gather` for maximum throughput.
+### Layer 0 — Sandbox Profiler
+- Runs `.py` inputs in a **subprocess** with timeout (not in-process `exec`).
 
-### Layer 1: Input & Parsing (5 Agents)
-- **Git Ingestor (`GI`)**, **Code Ingestor (`CI`)**, **Data Ingestor (`DI`)**, **Query Parser (`QP`)**.
-- **Style Agent (`SA`)**: Learns and persists the user's exact writing style and tone into a JSON fingerprint (`~/.arc_style_profile.json`), ensuring consistent, non-AI-like tone across sessions.
+### Layer 1 — Input & Parsing
+- Git / Code / Data ingestors, Style fingerprint (`~/.arc_style_profile.json`), Query parser.
 
-### Layer 2: Code Analysis (5 Agents)
-- **Code Breaker (`CB`)**: Deconstructs raw files into an AST-based Call Graph and embeds every function snippet into a **Local ChromaDB Vector Store** (`~/.arc_code_chroma`). This creates a Graph RAG mapping, preventing context loss, reducing LLM token costs, and dramatically accelerating code understanding.
-- **Algo Detector (`AD`)**, **Complexity Analyzer (`CA`)**, **HW Mapper (`HM`)**, **Bug & Edge Case (`BE`)**.
+### Layer 2 — Code Analysis
+- Code Breaker (AST + optional Chroma), Algo Detector, Complexity, HW Mapper, Bug & Edge Case.
 
-### Layer 3: Research & Grounding (6 Agents)
-- **Web Search Agent (`WSA`)**: Live web intelligence utilizing DuckDuckGo (`ddgs`) without requiring API keys.
-- **ArXiv Agent (`AA`)**: Fetches full-text PDFs using PyMuPDF and utilizes a **ChromaDB Semantic Vector Cache** (`~/.arc_arxiv_chroma`) to instantly bypass redundant API calls based on cosine similarity of search vectors.
-- **CS Agent (`CSA`)**, **Electronics Agent (`EA`)**, **Literature Agent (`LA`)**, **Gap Finder (`GF`)**.
+### Layer 3 — Research & Grounding
+- ArXiv (live API; **empty list on failure — no fabricated citations**), Web search (DuckDuckGo), CS / Electronics / Literature / Gap Finder.
+- Faculty profiles loaded by **FacultyProfileAgent** LangGraph node (`query → faculty → research`) from `./output/faculty_profiles/*.json` when present (pre-step: `process_faculty` / OpenAlex fetch). Does not invent profiles.
+- Flat skills: `general_research`, `litreview`, `deep_research`, plus `interdisciplinary_faculty` addendum when faculty JSON exists.
 
-### Layer 4: Synthesis & Structure (4 Agents)
-- **Connector (`Conn`)**, **Outline Builder (`OB`)**, **Citation Agent (`Cit`)**, **Critic Agent (`Crit`)**.
+### Layer 4 — Synthesis
+- Connector merges arxiv + code + cs + electronics + literature + web + faculty into `unified_context`.
+- Outline sections align with Writer skill keys (Abstract, Introduction, Literature Review, Methodology, System Architecture, Algorithm, Results, Discussion, Conclusion).
+- Citation agent formats real ArXiv items only.
+- Pre-write Critic scores structure before drafting.
 
-### Layer 4.5: Quality Audit & Peer Reviewer (5 Agents)
-- **Plagiarism Checker (`PC`)**: Similarity monitor (<15%).
-- **Plagiarism Remediator (`PR`)**: Reasoning-driven re-synthesis engine.
-- **AI Percentage Auditor (`AI`)**: AI footprint auditor (<10%).
-- **Peer Reviewer Agent (`PRV`)**: Evaluates 7 core journal submission questions.
-- **Format Quality Auditor (`FQA`)**: Grammar, terminology, and acronym auditor.
+### Layer 4.5 — Heuristic QA (approximate)
+- Plagiarism: local 5-gram overlap vs notes/arxiv (`method=local_ngram_heuristic`).
+- AI-style: buzzword/passive heuristics (`method=local_style_heuristic`).
+- Peer review / format / fact-check: require manuscript; fail closed if empty.
+- Dashboard labels these as **Heuristic QA (approximate)**.
 
-### Layer 5: Output Generation (3 Agents)
-- **Writer Agent (`WA`)**, **PDF Agent (`PDF`)**, **PPT Agent (`PPT`)**.
+### Layer 5 — Output
+- Writer drafts sections via flat skills; optional Mistral cloud when `CLOUD_LLM_API_KEY` is set; else local Ollama (`llama3.1:latest`).
+- PDF exporter renders **`markdown_manuscript`** (metrics appendix optional).
+- Artifacts: `{job_id}_ResearchPaper.pdf`, `{job_id}_Presentation.pptx`.
 
-### Hugging Face Upskill Integration Engine (`src/core/upskill_engine.py`)
-- **AgentTraceLogger**: Captures full execution traces, inputs, outputs, and timestamps across all 27 agents.
-- **SkillEvaluator**: Evaluates multi-agent accuracy across 4 academic dimensions (`academic_accuracy`, `citation_grounding`, `structural_coherence`, `reproducibility_score`) ensuring overall accuracy score >= 90.0%.
+### Layer 6 — Supervisor
+- LangGraph + **SqliteSaver** checkpointer (not MemorySaver).
+- HITL `interrupt_before` is **not** enabled by default; resume via `resume_pipeline(thread_id)`.
+- Agent traces logged for heuristic upskill eval (fails if no manuscript/traces).
+- Context metrics stub for logging (not a Mamba/Transformer model).
 
-### Local LLM Engine & Ollama Connector (`src/core/llm_client.py`)
-- **Privacy-First Offline Execution**: Full inference stack runs locally without relying on external cloud APIs, ensuring absolute privacy for proprietary codebases.
-- **Dual-Model Specialization**:
-  - **DeepSeek-R1 (Reasoning)**: Highly optimized for logical deduction, algorithmic complexity analysis, and multi-step synthesis.
-  - **Qwen2.5-Coder (Coding)**: Specializes in AST parsing, bug detection, and semantic code context understanding.
-- **Hardware Optimization**: Uses localized 7B models for rapid intermediate agent tasks, while escalating heavy academic synthesis to high-parameter Cloud APIs (e.g., Mistral Large) for maximum density and quality.
-### Hybrid Mamba-Transformer Neural Engine (`src/core/hybrid_engine.py`)
-- **Mamba Linear Scanner (`MambaLinearScanner`)**: $O(N)$ state-space model for rapid ingestion of large codebases and multi-page PDF notes.
-- **Transformer Attention Synthesizer (`TransformerAttentionSynthesizer`)**: Dense self-attention QKV engine connecting AST nodes to ArXiv citations.
-### Layer 0: Sandbox Runtime & Profiler (`src/agents/layer0_profiler.py`)
-- **Runtime Profiler Agent (`RPA`)**: Executes raw python code in an isolated sandbox runtime to measure true CPU execution time (`cpu_time_ms`), peak memory footprint (`peak_memory_mb`), and throughput (`throughput_ops_sec`).
+### Layer 7 — Dashboard
+- FastAPI UI/API; downloads resolve `{job_id}_*` filenames.
 
-### SQLite Database Persistence Engine (`src/core/database.py`)
-- **Durable Job Store (`db.sqlite3`)**: Persists job statuses, agent trace histories, quality audit scores, and output file locations across system reboots.
+## LLM stack (honest)
+| Role | Model / API |
+|------|-------------|
+| All non-writing agents | **Local only** — Ollama `ARC_LOCAL_MODEL` / `llama3.1:latest` |
+| Layer 5 section **writing** | Mistral cloud when `CLOUD_LLM_API_KEY` set (`ARC_WRITING_USE_CLOUD=1` default) |
+| Writing fallback | Local LLM if cloud missing/disabled |
+| Optional local coding fallback | `qwen2.5-coder:7b` on Ollama error |
 
-### Layer 7: Real-Time Web Dashboard & REST API (`src/web/dashboard.py`)
-- **FastAPI Control Center**: Interactive HTML5 dashboard with live 27-agent neural event log stream, job progress metrics, downloadable PDF research papers, and PPTX decks.
+## Skills wiring
 
+| Wired into Python agents | Source |
+|--------------------------|--------|
+| Claude-plugin `SKILL.md` (**preferred**) | `PLUGIN_SKILL_MAP` in `src/core/skills_loader.py` |
+| Flat prompts (fallback) | `src/skills/*.md` |
+| Section writers | abstract, introduction, literature_review, methodology, system_architecture, algorithm, results, discussion, conclusion, critic, generic |
+| L3 protocols | litreview, deep_research, research (+ topic routing: patent, grants, dossier, clinical, market, …) |
+| Faculty addendum | interdisciplinary_faculty (flat) when faculty JSON present |
 
+### Do Claude plugin skills work on local LLM?
+| Piece | On Ollama/local? |
+|-------|------------------|
+| `SKILL.md` as system prompt | **Yes** (truncated + ARC runtime adapter) |
+| Claude Code MCP / bash_tool / grill-me | **No** — Claude Code only |
+| Plugin helper scripts | Only if run separately; ARC does not auto-exec |
+| Search in ARC | Python agents (ArXiv/DDG) + local LLM following skill text |
+
+| Not auto-executed by LangGraph | Notes |
+|-------------------------------|-------|
+| `skills/*/scripts/` | Optional CLI helpers |
+| `.claude-plugin/` agents/commands | Claude Code only |
+
+## Persistence
+- Job/trace store: SQLite (`src/core/database.py`), checkpoints: `checkpoints.sqlite`.
+
+## Out of scope (by design)
+- Commercial plagiarism/AI APIs
+- Real Mamba/Transformer neural engines
+- Auto-executing Claude Code MCP/grill-me/docx packaging inside LangGraph

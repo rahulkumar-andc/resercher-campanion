@@ -1,8 +1,14 @@
-from typing import List, Dict, Any
+from typing import List
+import re
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext
-import chromadb
+
+
+def _join_bullets(items: List[str], empty: str = "None") -> str:
+    if not items:
+        return empty
+    return "\n".join(f"  * {x}" for x in items[:12])
 
 
 class Connector(BaseAgent):
@@ -10,49 +16,43 @@ class Connector(BaseAgent):
         super().__init__("Connector", layer=4, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Synthesizing unified context graph from Layer 2 (Code Analysis) and Layer 3 (Research)...")
-        
-        # Integrating ChromaDB Vector Store to prevent context bleeding
-        try:
-            chroma_client = chromadb.Client()
-            collection = chroma_client.create_collection(name="synthesis_context")
-            documents = []
-            if ctx.research.arxiv_papers:
-                documents.extend([p.abstract for p in ctx.research.arxiv_papers])
-            if ctx.code_analysis.function_blocks:
-                documents.extend([
-                    block.get("content_snippet", str(block)) if isinstance(block, dict) else str(block) 
-                    for block in ctx.code_analysis.function_blocks
-                ])
-                
-            if documents:
-                collection.add(
-                    documents=documents,
-                    ids=[str(i) for i in range(len(documents))]
-                )
-                self.log(ctx, f"Stored {len(documents)} context blocks in local ChromaDB Vector Store.")
-        except Exception as e:
-            self.log(ctx, f"Vector Store init warning: {e}", level="WARN")
+        self.log(ctx, "Synthesizing unified context from code analysis and full research grounding...")
 
         code = ctx.code_analysis
         research = ctx.research
 
-        # Deep Context Generation (Resolves Telephone Game Context Loss)
-        # 1. Gather all Paper Abstracts
-        abstracts_str = "\n\n".join([f"Title: {p.title}\nAuthors: {', '.join(p.authors)}\nAbstract: {p.abstract}" for p in research.arxiv_papers]) if research.arxiv_papers else "No papers retrieved."
-        
-        # 2. Gather Function Blocks and Edge Cases
-        functions_str = "\n".join([str(b) for b in code.function_blocks[:5]]) if code.function_blocks else "No function blocks extracted."
-        edge_cases_str = "\n".join(code.edge_cases) if hasattr(code, 'edge_cases') and code.edge_cases else "None identified."
-        hw_mapping_str = str(code.hardware_mapping) if hasattr(code, 'hardware_mapping') else "Generic CPU"
+        abstracts_str = (
+            "\n\n".join(
+                f"Title: {p.title}\nAuthors: {', '.join(p.authors)}\nAbstract: {p.abstract}"
+                for p in research.arxiv_papers
+            )
+            if research.arxiv_papers
+            else "No ArXiv papers retrieved."
+        )
+
+        functions_str = (
+            "\n".join(str(b) for b in code.function_blocks[:5])
+            if code.function_blocks
+            else "No function blocks extracted."
+        )
+        bugs = code.bugs_edge_cases or []
+        edge_cases_str = "\n".join(str(b) for b in bugs[:8]) if bugs else "None identified."
+        hw_mapping_str = str(code.hardware_mappings) if code.hardware_mappings else "Generic CPU"
+
+        # Truncate long web/lit blocks
+        web_snip = _join_bullets([(w[:400] + "…") if len(w) > 400 else w for w in (research.web_context or [])[:6]])
+        lit_snip = _join_bullets(research.literature_context or [])
+        cs_snip = _join_bullets(research.cs_context or [])
+        elec_snip = _join_bullets(research.electronics_context or [])
+        fac_snip = _join_bullets(research.faculty_context or [])
 
         unified = f"""
 # SYSTEM CONTEXT & DEEP RESEARCH GROUNDING
 **Topic**: {ctx.raw_topic}
 
 ## 1. SOURCE CODE ANALYSIS
-- **Metrics**: {code.file_count} files, {code.total_lines} lines ({', '.join(code.language_breakdown.keys()) if hasattr(code, 'language_breakdown') else 'N/A'})
-- **Algorithms Detected**: {', '.join([a['name'] for a in code.algorithms]) if code.algorithms else 'None'}
+- **Metrics**: {code.file_count} files, {code.total_lines} lines ({', '.join(code.language_breakdown.keys()) if code.language_breakdown else 'N/A'})
+- **Algorithms Detected**: {', '.join([a.get('name', str(a)) for a in code.algorithms]) if code.algorithms else 'None'}
 - **Hardware Profile**: {hw_mapping_str}
 - **Critical Edge Cases & Weaknesses**:
 {edge_cases_str}
@@ -62,14 +62,33 @@ class Connector(BaseAgent):
 
 ## 2. THEORETICAL RESEARCH & LITERATURE
 - **Primary Novelty Gaps**:
-{chr(10).join(['  * ' + g for g in research.novelty_gaps]) if research.novelty_gaps else 'None found'}
+{_join_bullets(research.novelty_gaps or [])}
 
-### Academic Grounding (Key Abstracts)
+### Academic Grounding (ArXiv Abstracts)
 {abstracts_str}
+
+### CS Context
+{cs_snip}
+
+### Electronics / Hardware Context
+{elec_snip}
+
+### Literature Review Findings
+{lit_snip}
+
+### Web Context
+{web_snip}
+
+### Faculty / Institutional Context
+{fac_snip}
 """.strip()
 
+        # Soft cap to keep LLM prompts manageable
+        if len(unified) > 24000:
+            unified = unified[:24000] + "\n\n[Context truncated]"
+
         ctx.synthesis.unified_context = unified
-        self.log(ctx, "Connector generated DEEP unified context, preserving full data fidelity.")
+        self.log(ctx, "Connector generated unified context merging arxiv/code/cs/electronics/literature/web/faculty.")
 
 
 class OutlineBuilder(BaseAgent):
@@ -77,33 +96,56 @@ class OutlineBuilder(BaseAgent):
         super().__init__("OutlineBuilder", layer=4, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Building paper and presentation document structure...")
+        self.log(ctx, "Building document outline aligned with job mode / Writer keys...")
         topic = ctx.raw_topic
+        mode = (ctx.job_mode or "full_paper").lower()
 
-        outline = [
-            {"section": "1. Title", "topics": ["Proposed paper title"]},
-            {"section": "2. Authors & affiliations", "topics": ["Author details and affiliations (AntiGravity Multi-Agent Research System, etc.)"]},
-            {"section": "3. Abstract", "topics": ["Problem statement", "Multi-agent architecture solution", "Key algorithmic findings"]},
-            {"section": "4. Keywords", "topics": ["5-7 relevant keywords"]},
-            {"section": "5. Introduction", "topics": [f"Background on {topic}", "Motivation and system objectives", "Key contributions"]},
-            {"section": "6. Literature Review", "topics": ["Related work survey", "Identified implementation gaps", "Theoretical comparison"]},
-            {"section": "7. Problem Statement", "topics": ["Detailed definition of the problem", "Scope and limitations of current solutions"]},
-            {"section": "8. Proposed Method / Methodology", "topics": ["Research methodology", "Data collection and evaluation strategies"]},
-            {"section": "9. System Architecture", "topics": ["Layer 1-6 agent decomposition", "AST static code analysis findings", "High-level module interactions"]},
-            {"section": "10. Algorithm / Flowchart", "topics": ["Algorithmic logic steps", "Flowchart narrative", "Step-by-step execution details"]},
-            {"section": "11. Mathematical Model", "topics": ["Big-O space & time complexity evaluation", "Theoretical constraints", "Mathematical formalization"]},
-            {"section": "12. Experimental Setup", "topics": ["Hardware mapping", "Software environment", "Simulation parameters"]},
-            {"section": "13. Results", "topics": ["Resource allocation patterns", "Concurrency & throughput evaluation", "Edge case mitigation data", "Tabular and graphical result narratives"]},
-            {"section": "14. Discussion", "topics": ["Interpretation of results", "Comparison against Literature Review", "Implications"]},
-            {"section": "15. Conclusion", "topics": ["Summary of findings", "Final verdict"]},
-            {"section": "16. Future Work", "topics": ["Impact on autonomous agent research", "Future extensions"]},
-            {"section": "17. Acknowledgement", "topics": ["Acknowledgments to frameworks and open-source contributors"]},
-            {"section": "18. References", "topics": ["Bibliography and reference list (IEEE)"]},
-            {"section": "19. Appendix", "topics": ["Supplementary data", "Additional context or Mermaid graphs"]}
-        ]
+        if mode == "literature_review":
+            outline = [
+                {
+                    "section": "1. Literature Review",
+                    "topics": ["Related work survey", "Themes", "Gaps", f"Focus: {topic}"],
+                }
+            ]
+        elif mode == "research_only":
+            outline = [
+                {
+                    "section": "1. Research Findings",
+                    "topics": ["Key findings", "Sources", "Gaps", "Implications"],
+                }
+            ]
+        elif mode == "complete_draft":
+            outline = [
+                {
+                    "section": "1. Manuscript Continuation",
+                    "topics": ["Continue and complete the provided draft", f"Topic: {topic}"],
+                }
+            ]
+        else:
+            outline = [
+                {"section": "1. Abstract", "topics": ["Problem statement", "Approach", "Key findings"]},
+                {"section": "2. Introduction", "topics": [f"Background on {topic}", "Motivation", "Contributions"]},
+                {"section": "3. Literature Review", "topics": ["Related work", "Gaps", "Comparison"]},
+                {"section": "4. Proposed Method / Methodology", "topics": ["Methods", "Evaluation strategy"]},
+                {"section": "5. System Architecture", "topics": ["Agent layers", "Module interactions"]},
+                {"section": "6. Algorithm / Flowchart", "topics": ["Algorithm steps", "Flow narrative"]},
+                {"section": "7. Results", "topics": ["Metrics", "Throughput", "Edge cases"]},
+                {"section": "8. Discussion", "topics": ["Interpretation", "Limitations"]},
+                {"section": "9. Conclusion", "topics": ["Summary", "Outlook"]},
+            ]
+            # Filter to selected writers when multi + subset chosen
+            if ctx.writer_mode == "multi" and ctx.selected_writers:
+                wanted = {w.strip().lower() for w in ctx.selected_writers}
+                filtered = []
+                for s in outline:
+                    base = re.sub(r"^\d+\.\s*", "", s["section"]).strip().lower()
+                    if base in wanted or s["section"].strip().lower() in wanted:
+                        filtered.append(s)
+                if filtered:
+                    outline = filtered
 
         ctx.synthesis.outline = outline
-        self.log(ctx, f"OutlineBuilder created 6-section document outline for '{topic}'.")
+        self.log(ctx, f"OutlineBuilder created {len(outline)}-section outline (mode={mode}).")
 
 
 class CitationAgent(BaseAgent):
@@ -111,7 +153,7 @@ class CitationAgent(BaseAgent):
         super().__init__("CitationAgent", layer=4, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Formatting citations and Bibliography into IEEE format...")
+        self.log(ctx, "Formatting citations into IEEE-style reference list...")
         papers = ctx.research.arxiv_papers
         formatted_citations = []
 
@@ -121,7 +163,7 @@ class CitationAgent(BaseAgent):
             self.log(ctx, f"[{idx}] {authors_str}, \"{paper.title},\" {paper.journal_or_arxiv}, {paper.year}.")
 
         ctx.synthesis.citations = formatted_citations
-        self.log(ctx, f"CitationAgent processed {len(formatted_citations)} IEEE references.")
+        self.log(ctx, f"CitationAgent processed {len(formatted_citations)} references (no fabricated entries).")
 
 
 class CriticAgent(BaseAgent):
@@ -129,21 +171,28 @@ class CriticAgent(BaseAgent):
         super().__init__("CriticAgent", layer=4, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Executing Devil's Advocate quality critique on synthesized structure...")
+        self.log(ctx, "Pre-write critique on synthesized structure...")
         feedback = []
-        score = 92.0
+        score = 85.0
 
         if not ctx.code_analysis.function_blocks:
-            feedback.append("Critique: Code analysis yielded no function blocks. Ensure raw source files are provided.")
+            feedback.append("Critique: Code analysis yielded no function blocks.")
             score -= 15.0
 
         if len(ctx.research.arxiv_papers) < 2:
-            feedback.append("Critique: Fewer than 2 citation references found. Adding secondary academic references.")
+            feedback.append("Critique: Fewer than 2 ArXiv citations. Proceeding without fabricated refs.")
             score -= 10.0
 
-        feedback.append("Validation: Clear novelty gap defined connecting code edge cases to theoretical background.")
-        feedback.append("Validation: IEEE citation references fully formatted and aligned with outline sections.")
+        if not ctx.synthesis.unified_context:
+            feedback.append("Critique: Empty unified context.")
+            score -= 20.0
 
-        ctx.synthesis.critic_score = score
+        if ctx.research.novelty_gaps:
+            feedback.append("Validation: Novelty gaps present for outline grounding.")
+        else:
+            feedback.append("Critique: No novelty gaps identified.")
+            score -= 5.0
+
+        ctx.synthesis.critic_score = max(0.0, score)
         ctx.synthesis.critic_feedback = feedback
-        self.log(ctx, f"CriticAgent completed evaluation. Quality Score: {score}/100.")
+        self.log(ctx, f"CriticAgent completed evaluation. Quality Score: {ctx.synthesis.critic_score}/100.")

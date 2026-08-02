@@ -1,0 +1,48 @@
+RULE 1 — Ek agent ek kaam
+         Koi agent 2 cheezein nahi karega
+
+RULE 2 — Har agent ka output typed hoga
+         String nahi — TypedDict ya JSON
+
+RULE 3 — Supervisor ke bina koi agent
+         directly doosre ko call nahi karega
+
+RULE 4 — Style profile hamesha
+         Writer agent ko milegi
+
+RULE 5 — Critic agent hamesha
+         Writer se pehle chalega
+
+RULE 6 — Cache mandatory hai
+         ArXiv, Semantic Scholar queries
+
+RULE 7 — Max tokens per agent:
+         Research agents  → 500 tokens
+         Writer agent     → 2000 tokens
+         Other agents     → 300 tokens
+
+RULE 8 — LLM or API model use karo
+         Light agents ke liye
+         Sonnet sirf Writer/Critic ke liye
+
+
+Supervisor → Plan banaye
+
+PARALLEL chalenge:
+├── ArXiv Agent    → "EM field levitation RL papers"
+├── CS Agent       → Algorithm complexity nikale
+├── RL Agent       → Reward function design kare
+│                    State = field strength
+│                    Action = current adjust
+│                    Reward = object height
+└── Gap Finder     → "RL + EM antigravity = novel!"
+
+PHIR:
+Connector → Sab jodte hain
+Critic    → "Reference missing hai Section 2 mein"
+Writer    → Paper likhta hai tumhari style mein
+
+OUTPUT:
+├── Full Research Paper (PDF)
+├── Presentation (PPT)  
+└── Literature Review
