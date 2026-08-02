@@ -37,7 +37,3 @@ class ContextMetricsStub:
             "sample_titles": titles,
             "hybrid_status": "CONTEXT_METRICS_STUB",
         }
-
-
-# Back-compat alias — callers expecting the old name get the stub
-HybridNeuralEngine = ContextMetricsStub

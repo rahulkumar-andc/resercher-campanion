@@ -80,6 +80,7 @@ class SynthesisResult:
 
 @dataclass
 class QualityAuditResult:
+    # Compatibility field names. These are local heuristic estimates, not external-service scores.
     plagiarism_percentage: Optional[float] = None
     ai_writing_percentage: Optional[float] = None
     reviewer_answers: Dict[str, str] = field(default_factory=dict)
@@ -94,6 +95,7 @@ class QualityAuditResult:
     is_estimate: bool = True
     plagiarism_method: str = "local_ngram_heuristic"
     ai_method: str = "local_style_heuristic"
+    fact_check_method: str = "local_reference_context_heuristic"
 
 
 
@@ -138,4 +140,4 @@ class PipelineContext:
     current_agent: str = ""
     progress_pct: float = 0.0
     eta_seconds: Optional[float] = None
-
+    work_dir: str = "./output"

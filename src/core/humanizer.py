@@ -17,6 +17,11 @@ except ImportError:
 
 from src.core.llm_client import LocalLLMClient
 
+
+def _llm_available(llm_client: LocalLLMClient) -> bool:
+    return llm_client.is_connected or llm_client.check_connection()
+
+
 class RegexFilter:
     def __init__(self):
         # Common AI filler words to eliminate
@@ -121,6 +126,9 @@ Make it sound natural, vary sentence structure, and use an empirical PhD-level t
 Return ONLY the rewritten text."""
 
     def adversarial_loop(self, text: str, max_rounds: int = 2) -> str:
+        if not _llm_available(self.llm):
+            return text
+
         current = text
         for round_num in range(max_rounds):
             detection_str = self.llm.generate(prompt=current, system_prompt=self.DETECTOR_PROMPT, temperature=0.1)
@@ -174,6 +182,8 @@ class StyleEmbeddingMatcher:
         score = self.style_score(text)
         if score >= threshold or not self.collection:
             return text
+        if not _llm_available(self.llm):
+            return text
             
         try:
             examples = self.collection.query(query_texts=[text], n_results=3)['documents'][0]
@@ -217,6 +227,8 @@ class PerplexityScorer:
 
     def boost_perplexity(self, text: str) -> str:
         if self.model is None or nltk is None:
+            return text
+        if not _llm_available(self.llm):
             return text
             
         sentences = sent_tokenize(text)

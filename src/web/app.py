@@ -1,6 +1,8 @@
 import os
 import time
 import asyncio
+import threading
+from pathlib import Path
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -21,6 +23,46 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 active_jobs: dict = {}
 active_websockets: List[WebSocket] = []
+JOB_TTL_SECONDS = 60 * 60
+supervisor: Optional[SupervisorAgent] = None
+supervisor_init_lock = threading.Lock()
+supervisor_run_lock = threading.Lock()
+app_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _broadcast_from_supervisor(msg) -> None:
+    if app_loop and app_loop.is_running():
+        asyncio.run_coroutine_threadsafe(broadcast_log(msg), app_loop)
+
+
+def _get_supervisor() -> SupervisorAgent:
+    global supervisor
+    with supervisor_init_lock:
+        if supervisor is None:
+            supervisor = SupervisorAgent()
+            supervisor.bus.subscribe(_broadcast_from_supervisor)
+        return supervisor
+
+
+def _safe_upload_path(job_id: str, filename: str) -> str:
+    safe_name = Path(filename.replace("\\", "/")).name
+    if safe_name in {"", ".", ".."}:
+        raise ValueError("Invalid upload filename")
+    return os.path.join(UPLOAD_DIR, f"{job_id}_{safe_name}")
+
+
+@app.on_event("startup")
+async def initialize_supervisor() -> None:
+    global app_loop
+    app_loop = asyncio.get_running_loop()
+    _get_supervisor()
+
+
+async def _evict_job_after_ttl(job_id: str, ctx: PipelineContext) -> None:
+    """Retain completed job status briefly without retaining contexts indefinitely."""
+    await asyncio.sleep(JOB_TTL_SECONDS)
+    if active_jobs.get(job_id) is ctx:
+        active_jobs.pop(job_id, None)
 
 
 @app.get("/")
@@ -84,7 +126,7 @@ async def run_pipeline_api(
     if code_files:
         for f in code_files:
             if f.filename:
-                path = os.path.join(UPLOAD_DIR, f"{job_id}_{f.filename}")
+                path = _safe_upload_path(job_id, f.filename)
                 with open(path, "wb") as buffer:
                     buffer.write(await f.read())
                 saved_code_paths.append(path)
@@ -92,7 +134,7 @@ async def run_pipeline_api(
     if notes_files:
         for f in notes_files:
             if f.filename:
-                path = os.path.join(UPLOAD_DIR, f"{job_id}_{f.filename}")
+                path = _safe_upload_path(job_id, f.filename)
                 with open(path, "wb") as buffer:
                     buffer.write(await f.read())
                 saved_notes_paths.append(path)
@@ -115,13 +157,11 @@ async def run_pipeline_api(
 
     loop = asyncio.get_running_loop()
     def process_job():
-        supervisor = SupervisorAgent()
-        
-        def sync_broadcast(msg):
-            asyncio.run_coroutine_threadsafe(broadcast_log(msg), loop)
-            
-        supervisor.bus.subscribe(sync_broadcast)
-        supervisor.execute_pipeline(ctx, output_dir=OUTPUT_DIR)
+        try:
+            with supervisor_run_lock:
+                _get_supervisor().execute_pipeline(ctx, output_dir=OUTPUT_DIR)
+        finally:
+            asyncio.run_coroutine_threadsafe(_evict_job_after_ttl(job_id, ctx), loop)
 
     background_tasks.add_task(process_job)
 

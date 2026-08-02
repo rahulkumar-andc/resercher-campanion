@@ -127,13 +127,10 @@ def _resolve_cloud_api_key() -> Optional[str]:
     if key:
         return key
     try:
-        with open(".env", "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("CLOUD_LLM_API_KEY="):
-                    return line.strip().split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
-    return None
+        from dotenv import dotenv_values
+        return dotenv_values(".env").get("CLOUD_LLM_API_KEY")
+    except ImportError:
+        return None
 
 
 def cloud_write_completion(

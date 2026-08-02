@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext
+from src.core.llm_utils import strip_code_fence
 from src.core.style_engine import StyleEngine
 
 try:
@@ -176,16 +177,8 @@ Topic: {topic}"""
         response = self.llm.generate(prompt=prompt, system_prompt="You are a JSON-only API.", max_tokens=150, temperature=0.3)
         
         try:
-            # Clean up potential markdown formatting from LLM response
-            clean_json = response.strip()
-            if clean_json.startswith("```json"):
-                clean_json = clean_json[7:]
-            if clean_json.startswith("```"):
-                clean_json = clean_json[3:]
-            if clean_json.endswith("```"):
-                clean_json = clean_json[:-3]
-            
-            subtopics = json.loads(clean_json.strip())
+            clean_json = strip_code_fence(response)
+            subtopics = json.loads(clean_json)
             if not isinstance(subtopics, list):
                 raise ValueError("Response is not a list")
         except Exception as e:

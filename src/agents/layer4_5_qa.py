@@ -30,16 +30,16 @@ def _corpus_from_ctx(ctx: PipelineContext) -> str:
 
 
 class PlagiarismCheckerAgent(BaseAgent):
-    """Local n-gram overlap heuristic vs ingested notes/arxiv — approximate only."""
+    """Local corpus-overlap heuristic, not an external plagiarism check."""
 
     def __init__(self, bus: SupervisorBus, max_threshold: float = 15.0):
         super().__init__("PlagiarismCheckerAgent", layer=4, bus=bus)
         self.max_threshold = max_threshold
 
     def run(self, ctx: PipelineContext) -> None:
-        ctx.quality_audit.plagiarism_method = "local_ngram_heuristic"
+        ctx.quality_audit.plagiarism_method = "local_corpus_ngram_overlap_heuristic"
         ctx.quality_audit.is_estimate = True
-        self.log(ctx, "Heuristic plagiarism scan (local n-gram overlap; approximate)...")
+        self.log(ctx, "Heuristic local corpus-overlap scan (not an external plagiarism check)...")
 
         if not ctx.output.markdown_manuscript:
             ctx.quality_audit.plagiarism_percentage = None
@@ -69,13 +69,13 @@ class PlagiarismCheckerAgent(BaseAgent):
         ctx.quality_audit.plagiarism_percentage = similarity
         self.log(
             ctx,
-            f"Heuristic plagiarism estimate: {similarity}% "
-            f"(method={ctx.quality_audit.plagiarism_method}; threshold {self.max_threshold}%).",
+            f"Local corpus-overlap estimate: {similarity}% (not a plagiarism determination; "
+            f"method={ctx.quality_audit.plagiarism_method}; threshold {self.max_threshold}%).",
         )
 
         if similarity > self.max_threshold:
             err_msg = (
-                f"Plagiarism heuristic failed: Similarity {similarity}% exceeds "
+                f"Corpus-overlap heuristic flagged: similarity {similarity}% exceeds "
                 f"policy limit ({self.max_threshold}%)."
             )
             self.log(ctx, err_msg, level="WARN")
@@ -130,16 +130,16 @@ class PlagiarismRemediatorAgent(BaseAgent):
 
 
 class AIPercentageAuditorAgent(BaseAgent):
-    """Local style/buzzword heuristic — approximate only."""
+    """Local style-indicator heuristic, not an AI-authorship detector."""
 
     def __init__(self, bus: SupervisorBus, max_ai_threshold: float = 10.0):
         super().__init__("AIPercentageAuditorAgent", layer=4, bus=bus)
         self.max_ai_threshold = max_ai_threshold
 
     def run(self, ctx: PipelineContext) -> None:
-        ctx.quality_audit.ai_method = "local_style_heuristic"
+        ctx.quality_audit.ai_method = "local_buzzword_passive_voice_heuristic"
         ctx.quality_audit.is_estimate = True
-        self.log(ctx, "Heuristic AI-style scan (buzzwords/passive; approximate)...")
+        self.log(ctx, "Heuristic AI-style indicator scan (buzzwords/passive; not an authorship detector)...")
 
         if not ctx.output.markdown_manuscript:
             ctx.quality_audit.ai_writing_percentage = None
@@ -164,13 +164,13 @@ class AIPercentageAuditorAgent(BaseAgent):
         ctx.quality_audit.ai_writing_percentage = ai_score
         self.log(
             ctx,
-            f"Heuristic AI-style estimate: {ai_score}% "
+            f"Heuristic AI-style indicator estimate: {ai_score}% "
             f"(method={ctx.quality_audit.ai_method}; buzzwords={found}).",
         )
 
         if ai_score > self.max_ai_threshold:
             err_msg = (
-                f"AI Writing heuristic failed: score {ai_score}% exceeds "
+                f"AI-style heuristic flagged: score {ai_score}% exceeds "
                 f"policy limit ({self.max_ai_threshold}%)."
             )
             self.log(ctx, err_msg, level="WARN")
@@ -287,10 +287,11 @@ class FactCheckerAgent(BaseAgent):
     """Cross-checks statistical claims against web/literature context when available."""
 
     def __init__(self, bus: SupervisorBus):
-        super().__init__("FactCheckerAgent", layer=4.5, bus=bus)
+        super().__init__("FactCheckerAgent", layer=5, bus=bus)
 
     def run(self, ctx: PipelineContext) -> None:
-        self.log(ctx, "Heuristic fact check against web/literature context...")
+        ctx.quality_audit.fact_check_method = "local_reference_context_statistic_heuristic"
+        self.log(ctx, "Heuristic fact-context scan against collected web/literature text (not claim verification)...")
         if not ctx.output.markdown_manuscript:
             ctx.quality_audit.is_approved = False
             reason = "No manuscript to audit"
@@ -306,7 +307,7 @@ class FactCheckerAgent(BaseAgent):
 
         # Soft pass if no external context — do not invent failures
         if not ref_text.strip():
-            self.log(ctx, "No web/literature context; fact-check skipped (not a failure).", level="INFO")
+            self.log(ctx, "No web/literature context; heuristic fact-context scan skipped (not a failure).", level="INFO")
             return
 
         hallucinations = 0
@@ -317,11 +318,11 @@ class FactCheckerAgent(BaseAgent):
                 reasons.append(f"Unsubstantiated statistic '{claim}' not found in reference context.")
 
         if hallucinations > 2:
-            err_msg = f"Fact-check heuristic: {hallucinations} unverified stats. {reasons[:3]}"
+            err_msg = f"Fact-context heuristic: {hallucinations} unverified statistics. {reasons[:3]}"
             self.log(ctx, err_msg, level="WARN")
             ctx.quality_audit.is_approved = False
             if err_msg not in ctx.quality_audit.rejection_reasons:
                 ctx.quality_audit.rejection_reasons.append(err_msg)
             ctx.quality_audit.feedback_reroute_target = "WriterAgent"
         else:
-            self.log(ctx, "Fact-check heuristic completed.")
+            self.log(ctx, "Heuristic fact-context scan completed.")

@@ -1,5 +1,6 @@
 import asyncio
 import time
+import threading
 from typing import Callable, List, Dict, Any
 from src.core.models import AgentMessage, PipelineContext, PipelineStage
 
@@ -11,6 +12,7 @@ class SupervisorBus:
         self._listeners: List[Callable[[AgentMessage], None]] = []
         self._async_listeners: List[Callable[[AgentMessage], Any]] = []
         self._message_history: List[AgentMessage] = []
+        self._lock = threading.Lock()
 
     def subscribe(self, callback: Callable[[AgentMessage], None]):
         self._listeners.append(callback)
@@ -28,9 +30,10 @@ class SupervisorBus:
             data=data or {},
             timestamp=time.time()
         )
-        ctx.logs.append(msg)
-        self._message_history.append(msg)
-        update_progress(ctx, agent_name=agent_name)
+        with self._lock:
+            ctx.logs.append(msg)
+            self._message_history.append(msg)
+            update_progress(ctx, agent_name=agent_name)
 
         for listener in self._listeners:
             try:

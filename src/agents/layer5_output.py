@@ -12,7 +12,8 @@ from src.exporters.bibtex_exporter import BibTeXExporter
 from src.exporters.pdf_exporter import PDFExporter
 from src.exporters.pptx_exporter import PPTXExporter
 from src.core.llm_client import LocalLLMClient, cloud_write_completion
-from src.core.humanizer import RegexFilter
+from src.core.llm_utils import strip_code_fence
+from src.core.humanizer import HumanizerPipeline
 
 class SectionOutput(BaseModel):
     content: str = Field(..., description="The markdown content for the section.")
@@ -77,17 +78,11 @@ REQUIREMENTS:
 
 {section_name}:"""
 
-    import os
-
     # Writing-only cloud path; research/QA agents never call this helper.
     content_str = cloud_write_completion(system_prompt, section_prompt)
     if content_str:
         try:
-            if content_str.startswith("```json"):
-                content_str = content_str[7:-3].strip()
-            elif content_str.startswith("```"):
-                content_str = content_str[3:-3].strip()
-            return SectionOutput.model_validate_json(content_str)
+            return SectionOutput.model_validate_json(strip_code_fence(content_str))
         except Exception as e:
             agent.log(ctx, f"Cloud writing JSON parse failed on {section_name}: {e}. Local fallback.", level="WARN")
     else:
@@ -95,8 +90,7 @@ REQUIREMENTS:
 
     fallback_prompt = f"{system_prompt}\n\n{section_prompt}"
     res_str = agent.llm.generate(prompt=fallback_prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=3000)
-    if res_str.startswith("```json"): res_str = res_str[7:-3].strip()
-    elif res_str.startswith("```"): res_str = res_str[3:-3].strip()
+    res_str = strip_code_fence(res_str)
     try:
         return SectionOutput.model_validate_json(res_str)
     except:
@@ -174,9 +168,9 @@ class GenericSectionAgent(BaseAgent):
         self.log(ctx, f"Drafting {section_name}...")
         return _generate_section_content(self, ctx, section_name, section_topics, "generic", user_existing_text)
 
-class CriticAgent(BaseAgent):
+class SectionCriticAgent(BaseAgent):
     def __init__(self, bus: SupervisorBus):
-        super().__init__("CriticAgent", layer=5, bus=bus)
+        super().__init__("SectionCriticAgent", layer=5, bus=bus)
     def run(self, ctx: PipelineContext, section_name: str, output: SectionOutput) -> CriticFeedback:
         self.log(ctx, f"Critic Agent validating {section_name}...")
         
@@ -187,8 +181,7 @@ class CriticAgent(BaseAgent):
         
         res_str = self.llm.generate(prompt=review_prompt, system_prompt=system_prompt, temperature=0.2, max_tokens=1000)
         
-        if res_str.startswith("```json"): res_str = res_str[7:-3].strip()
-        elif res_str.startswith("```"): res_str = res_str[3:-3].strip()
+        res_str = strip_code_fence(res_str)
         
         try:
             feedback = CriticFeedback.model_validate_json(res_str)
@@ -326,7 +319,7 @@ class WriterAgent(BaseAgent):
         # --- multi section agents (default full_paper / literature with multi) ---
         self.log(ctx, "Multi-agent section synthesis...")
         full_manuscript = f"# {topic}\n\n"
-        critic = CriticAgent(self.bus)
+        critic = SectionCriticAgent(self.bus)
 
         def generate_and_critique(section_dict):
             section_title = section_dict["section"]
@@ -367,8 +360,10 @@ class WriterAgent(BaseAgent):
         ctx.output.markdown_manuscript = md_content
         if ctx.style_fingerprint:
             try:
-                ctx.output.markdown_manuscript = RegexFilter().filter(md_content)
-                self.log(ctx, "Applied style RegexFilter humanizer pass.")
+                style_docs = [ctx.draft_text] if ctx.draft_text.strip() else []
+                humanizer = HumanizerPipeline(self.llm, user_style_docs=style_docs)
+                ctx.output.markdown_manuscript = humanizer.humanize(md_content)
+                self.log(ctx, "Applied full HumanizerPipeline (regex, burstiness, perplexity, style, adversarial).")
             except Exception as e:
                 self.log(ctx, f"Humanizer skipped: {e}", level="WARN")
 
@@ -449,4 +444,3 @@ class DataVizAgent(BaseAgent):
         ctx.synthesis.diagrams.append(mermaid_chart)
         
         self.log(ctx, f"DataVizAgent successfully generated architectural diagram for '{algo_name}'.")
-

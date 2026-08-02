@@ -1,7 +1,11 @@
 import time
+import sqlite3
+import concurrent.futures
 from typing import Optional, TypedDict
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.sqlite import SqliteSaver
 
+from src.core.database import DatabaseEngine
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext, PipelineStage
 from src.agents.layer0_profiler import RuntimeProfilerAgent
@@ -35,8 +39,15 @@ class ResearchState(TypedDict):
 class SupervisorAgent:
     """Layer 6 Central Orchestrator powered by LangGraph."""
 
-    def __init__(self, bus: Optional[SupervisorBus] = None):
+    def __init__(
+        self,
+        bus: Optional[SupervisorBus] = None,
+        database: Optional[DatabaseEngine] = None,
+        checkpoint_path: str = "checkpoints.sqlite",
+    ):
         self.bus = bus or SupervisorBus()
+        self.db = database or DatabaseEngine()
+        self.checkpoint_path = checkpoint_path
         self.trace_logger = AgentTraceLogger()
         self.skill_evaluator = SkillEvaluator()
         self.context_metrics = ContextMetricsStub()
@@ -75,11 +86,31 @@ class SupervisorAgent:
         self.ppt_agent = PPTAgent(self.bus)
         self.dataviz_agent = DataVizAgent(self.bus)
 
-        self.graph = self._build_graph()
-
     def _trace(self, ctx: PipelineContext, agent_name: str, layer: int, inp: str, out: str):
         self.trace_logger.log_agent_trace(ctx.job_id, agent_name, layer, inp, out)
         update_progress(ctx, agent_name=agent_name)
+
+    def _save_job(self, ctx: PipelineContext) -> None:
+        try:
+            self.db.save_job(ctx)
+        except Exception as exc:
+            self.bus.publish(
+                ctx,
+                "SupervisorAgent",
+                6,
+                f"Job persistence failed: {exc}",
+                level="WARN",
+            )
+
+    def _open_graph(self):
+        """Create a graph with a checkpoint connection scoped to one invocation."""
+        conn = sqlite3.connect(self.checkpoint_path, check_same_thread=False)
+        try:
+            graph = self._build_graph(SqliteSaver(conn))
+        except Exception:
+            conn.close()
+            raise
+        return graph, conn
 
     # --- NODE WRAPPERS ---
 
@@ -148,19 +179,26 @@ class SupervisorAgent:
                 self.hw_mapper.run(ctx)
                 self.bug_edge_case.run(ctx)
             except Exception as e:
-                ctx.errors.append(f"L2 Error: {e}")
+                return f"L2 Error: {e}"
+            return None
 
         def run_l3():
             try:
                 self.research_orchestrator.run(ctx)
             except Exception as e:
-                ctx.errors.append(f"L3 Error: {e}")
+                return f"L3 Error: {e}"
+            return None
 
-        if skip_l2:
-            self.bus.publish(ctx, "SupervisorAgent", 6, f"Skipping L2 code analysis (mode={mode})")
-        else:
-            run_l2()
-        run_l3()
+        tasks = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            if skip_l2:
+                self.bus.publish(ctx, "SupervisorAgent", 6, f"Skipping L2 code analysis (mode={mode})")
+            else:
+                tasks["L2"] = executor.submit(run_l2)
+            tasks["L3"] = executor.submit(run_l3)
+            errors = [future.result() for future in tasks.values()]
+
+        ctx.errors.extend(error for error in errors if error)
         self._trace(
             ctx,
             "ResearchOrchestrator",
@@ -227,8 +265,8 @@ class SupervisorAgent:
     def _node_writer(self, state: ResearchState):
         ctx = state["ctx"]
         self.bus.set_stage(ctx, PipelineStage.OUTPUT_GENERATION, "Layer 5 generating manuscript")
-        # Reset approval before post-write QA
-        ctx.quality_audit.is_approved = True
+        # Require post-write QA to explicitly approve the manuscript.
+        ctx.quality_audit.is_approved = False
         ctx.quality_audit.rejection_reasons = []
         self.writer_agent.run(ctx, output_dir=state["output_dir"])
         self._trace(ctx, "WriterAgent", 5, "outline", f"chars={len(ctx.output.markdown_manuscript or '')}")
@@ -263,9 +301,13 @@ class SupervisorAgent:
         return {"ctx": state["ctx"]}
 
     def _node_fact_checker(self, state: ResearchState):
-        self.fact_checker.run(state["ctx"])
-        self._trace(state["ctx"], "FactCheckerAgent", 4, "manuscript", f"approved={state['ctx'].quality_audit.is_approved}")
-        return {"ctx": state["ctx"]}
+        ctx = state["ctx"]
+        self.fact_checker.run(ctx)
+        # The final QA gate is the only place that can approve a manuscript.
+        if not ctx.quality_audit.rejection_reasons:
+            ctx.quality_audit.is_approved = True
+        self._trace(ctx, "FactCheckerAgent", 5, "manuscript", f"approved={ctx.quality_audit.is_approved}")
+        return {"ctx": ctx}
 
     def _router_after_audit(self, state: ResearchState):
         ctx = state["ctx"]
@@ -295,7 +337,7 @@ class SupervisorAgent:
             level="WARN",
         )
         joined = " ".join(ctx.quality_audit.rejection_reasons)
-        if "Plagiarism" in joined or "plagiarism" in joined.lower():
+        if "overlap" in joined.lower():
             if ctx.output.markdown_manuscript:
                 ctx.output.markdown_manuscript = self.plagiarism_remediator.remediate(
                     ctx, ctx.output.markdown_manuscript
@@ -319,6 +361,16 @@ class SupervisorAgent:
         traces = self.trace_logger.traces.get(ctx.job_id, [])
         eval_res = self.skill_evaluator.evaluate_pipeline(ctx, traces)
         ctx.quality_audit.upskill_accuracy_score = eval_res.overall_accuracy
+        ctx.quality_audit.upskill_metrics = {
+            name: score
+            for name, score in {
+                "academic_accuracy": eval_res.academic_accuracy,
+                "citation_grounding": eval_res.citation_grounding,
+                "structural_coherence": eval_res.structural_coherence,
+                "reproducibility_score": eval_res.reproducibility_score,
+            }.items()
+            if score is not None
+        }
         ctx.quality_audit.is_estimate = True
         ctx.quality_audit.qa_method = eval_res.method
         if eval_res.overall_accuracy is not None:
@@ -356,7 +408,7 @@ class SupervisorAgent:
         self.bus.set_stage(state["ctx"], PipelineStage.FAILED, "Pipeline failed")
         return {"ctx": state["ctx"]}
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self, checkpointer: SqliteSaver) -> StateGraph:
         builder = StateGraph(ResearchState)
 
         builder.add_node("profiler", self._node_profiler)
@@ -427,22 +479,17 @@ class SupervisorAgent:
         builder.add_edge("evaluator", END)
         builder.add_edge("error_handler", END)
 
-        from langgraph.checkpoint.sqlite import SqliteSaver
-        import sqlite3
-
-        # SqliteSaver for fault-tolerant checkpoints (not MemorySaver).
-        # HITL interrupt_before is not enabled; resume via resume_pipeline(thread_id).
-        conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
-        memory = SqliteSaver(conn)
-        return builder.compile(checkpointer=memory)
+        return builder.compile(checkpointer=checkpointer)
 
     def execute_pipeline(self, ctx: PipelineContext, output_dir: str = "./output") -> PipelineContext:
         ctx.start_time = time.time()
         self.bus.publish(ctx, "SupervisorAgent", 6, f"Starting LangGraph execution for job: {ctx.job_id}")
 
+        conn = None
         try:
+            graph, conn = self._open_graph()
             config = {"configurable": {"thread_id": ctx.job_id}}
-            final_state = self.graph.invoke(
+            final_state = graph.invoke(
                 {
                     "ctx": ctx,
                     "retry_count": 0,
@@ -457,12 +504,25 @@ class SupervisorAgent:
             ctx.errors.append(err_msg)
             self.bus.publish(ctx, "SupervisorAgent", 6, err_msg, level="ERROR")
             self.bus.set_stage(ctx, PipelineStage.FAILED, err_msg)
+        finally:
+            if conn is not None:
+                conn.close()
 
         ctx.end_time = time.time()
+        self._save_job(ctx)
         return ctx
 
     def resume_pipeline(self, job_id: str) -> PipelineContext:
         """Resume from SqliteSaver checkpoint using sync invoke."""
         config = {"configurable": {"thread_id": job_id}}
-        final_state = self.graph.invoke(None, config=config)
-        return final_state["ctx"]
+        conn = None
+        try:
+            graph, conn = self._open_graph()
+            final_state = graph.invoke(None, config=config)
+        finally:
+            if conn is not None:
+                conn.close()
+        ctx = final_state["ctx"]
+        ctx.end_time = time.time()
+        self._save_job(ctx)
+        return ctx

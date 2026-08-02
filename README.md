@@ -181,6 +181,10 @@ flowchart TD
    - `/nn2d`: Interactive 2D Network graph of the agent state space.
    - `/vault`: A persistent Artifacts Vault for browsing and downloading generated PDFs and PPTXs.
 
+### QA limitations
+
+ARC's QA values are local heuristic estimates, not externally validated scores. The corpus-overlap value compares n-grams against context already provided to the pipeline; it is not a plagiarism-database result. The AI-style value uses local buzzword and passive-voice signals; it is not an AI-authorship determination. Fact checking only compares selected statistics with collected context text and does not verify claims. Use independent plagiarism, authorship, and fact-verification services for publication or compliance decisions.
+
 ---
 
 ## 📦 Project Directory Structure
@@ -229,6 +233,8 @@ cd reserch-campanion
 
 # Install Python dependencies
 pip install -r requirements.txt
+# Optional: enable local GPT-2 perplexity scoring in HumanizerPipeline
+pip install -r requirements-humanizer.txt
 ```
 
 ### 2. Launching Interactive Web Dashboard

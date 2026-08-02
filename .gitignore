@@ -2,7 +2,9 @@
 .auxly/
 .antigravity/
 __pycache__/
+**/__pycache__/
 *.pyc
+*.pyo
 /uploads/
 /output/
 checkpoints.sqlite*

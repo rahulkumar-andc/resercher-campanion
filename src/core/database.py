@@ -7,6 +7,7 @@ import sqlite3
 import json
 import os
 import time
+from contextlib import closing
 from typing import Dict, Any, List, Optional
 from src.core.models import PipelineContext
 
@@ -25,7 +26,7 @@ class DatabaseEngine:
         return conn
 
     def _init_db(self):
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -69,7 +70,7 @@ class DatabaseEngine:
 
     def save_job(self, ctx: PipelineContext):
         preview = (ctx.output.markdown_manuscript or "")[:4000]
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO jobs (
@@ -108,7 +109,7 @@ class DatabaseEngine:
             conn.commit()
 
     def log_agent_event(self, job_id: str, agent_name: str, layer: int, content: str, level: str = "INFO"):
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO agent_logs (job_id, agent_name, layer, content, level, timestamp)
@@ -117,20 +118,20 @@ class DatabaseEngine:
             conn.commit()
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
 
     def list_recent_jobs(self, limit: int = 20) -> List[Dict[str, Any]]:
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
     def get_job_logs(self, job_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT agent_name, layer, content, level, timestamp FROM agent_logs "

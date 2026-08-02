@@ -1,4 +1,9 @@
+import csv
+import json
+import hashlib
+import ipaddress
 import urllib.request
+import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
 import socket
@@ -6,26 +11,43 @@ import time
 import tempfile
 import os
 from typing import List, Dict, Any
-import concurrent.futures
 from pydantic import BaseModel, Field
 from src.agents.base_agent import BaseAgent
 from src.core.event_bus import SupervisorBus
 from src.core.models import PipelineContext, CitationItem
 from src.core.skills_loader import load_skill_prompt, faculty_skill_addendum, select_research_skill
+from src.core.llm_utils import strip_code_fence
 
 class ResearchFindings(BaseModel):
     findings: List[str] = Field(description="List of key research findings")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects whose target fails the same SSRF validation."""
+
+    def __init__(self, validator):
+        super().__init__()
+        self.validator = validator
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not self.validator(newurl):
+            raise urllib.error.HTTPError(newurl, 403, "Unsafe redirect target", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 try:
     import fitz  # PyMuPDF
 except ImportError:
     fitz = None
 
-import json
-import hashlib
 import chromadb
 
 class ArXivAgent(BaseAgent):
+    _METADATA_HOSTS = {
+        "metadata.google.internal",
+        "metadata.aws.internal",
+        "instance-data.ec2.internal",
+    }
+
     def __init__(self, bus: SupervisorBus):
         super().__init__("ArXivAgent", layer=3, bus=bus)
         
@@ -73,25 +95,50 @@ class ArXivAgent(BaseAgent):
             pass
 
     def is_safe_url(self, url: str) -> bool:
-        """SSRF Protection: Block localhost and internal IP scans"""
+        """Allow only public HTTP(S) hosts after resolving every address."""
         parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return False
         hostname = parsed.hostname
-        if not hostname: return False
-        if hostname in ['localhost', '127.0.0.1', '0.0.0.0']: return False
+        if not hostname:
+            return False
+        hostname = hostname.rstrip(".").lower()
+        if hostname in {"localhost", *self._METADATA_HOSTS}:
+            return False
         try:
-            ip = socket.gethostbyname(hostname)
-            if ip.startswith('127.') or ip.startswith('10.') or ip.startswith('192.168.'):
+            addresses = {
+                info[4][0]
+                for info in socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+            }
+            if not addresses:
                 return False
-        except socket.error:
-            pass
+            for address in addresses:
+                ip = ipaddress.ip_address(address)
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_reserved
+                    or ip.is_unspecified
+                    or ip.is_multicast
+                ):
+                    return False
+        except (socket.gaierror, ValueError):
+            return False
         return True
+
+    def _safe_urlopen(self, request: urllib.request.Request, timeout: int):
+        if not self.is_safe_url(request.full_url):
+            raise ValueError("SSRF blocked: unsafe URL")
+        opener = urllib.request.build_opener(_SafeRedirectHandler(self.is_safe_url))
+        return opener.open(request, timeout=timeout)
 
     def fetch_pdf_text(self, pdf_url: str) -> str:
         if not fitz:
             return ""
         try:
             req = urllib.request.Request(pdf_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with self._safe_urlopen(req, timeout=10) as response:
                 pdf_data = response.read()
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -136,7 +183,7 @@ class ArXivAgent(BaseAgent):
             for attempt in range(3):
                 try:
                     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=5) as response:
+                    with self._safe_urlopen(req, timeout=5) as response:
                         xml_data = response.read()
                     break
                 except Exception as net_e:
@@ -201,7 +248,7 @@ class CSAgent(BaseAgent):
         system_prompt = load_skill_prompt(skill_key if skill_key != "research" else "general_research")
         self.log(ctx, f"CSAgent using skill map key: {skill_key}")
         slug = topic.replace(" ", "_")[:20].lower()
-        work_dir = os.path.join(ctx.work_dir if hasattr(ctx, 'work_dir') else "./output", "general_research", slug)
+        work_dir = os.path.join(ctx.work_dir, "general_research", slug)
         os.makedirs(os.path.join(work_dir, "sources"), exist_ok=True)
         
         # Phase 1: Decompose
@@ -210,8 +257,7 @@ class CSAgent(BaseAgent):
         decomp_res = self.llm.generate(prompt=decomp_prompt, system_prompt=system_prompt)
         
         try:
-            if decomp_res.startswith("```json"): decomp_res = decomp_res[7:-3].strip()
-            elif decomp_res.startswith("```"): decomp_res = decomp_res[3:-3].strip()
+            decomp_res = strip_code_fence(decomp_res)
             sub_qs = json.loads(decomp_res).get("sub_questions", [topic])
         except Exception:
             sub_qs = [f"{topic} algorithms", f"{topic} system architecture", f"{topic} performance"]
@@ -243,8 +289,7 @@ class CSAgent(BaseAgent):
         res = self.llm.generate(prompt=synthesis_prompt, system_prompt=system_prompt + "\n\nYou MUST return ONLY valid JSON.")
         
         try:
-            if res.startswith("```json"): res = res[7:-3].strip()
-            elif res.startswith("```"): res = res[3:-3].strip()
+            res = strip_code_fence(res)
             data = ResearchFindings.model_validate_json(res)
             ctx.research.cs_context = data.findings
             with open(os.path.join(work_dir, "briefing.md"), "w") as f:
@@ -270,10 +315,7 @@ class ElectronicsAgent(BaseAgent):
         )
         res = self.llm.generate(prompt=prompt, system_prompt=system_prompt + "\nReturn ONLY valid JSON.")
         try:
-            if res.startswith("```json"):
-                res = res[7:-3].strip()
-            elif res.startswith("```"):
-                res = res[3:-3].strip()
+            res = strip_code_fence(res)
             data = ResearchFindings.model_validate_json(res)
             ctx.research.electronics_context = data.findings
         except Exception:
@@ -290,7 +332,7 @@ class LiteratureAgent(BaseAgent):
         self.log(ctx, "Starting Literature Review Protocol...")
         topic = ctx.raw_topic
         slug = topic.replace(" ", "_")[:20].lower()
-        work_dir = os.path.join(ctx.work_dir if hasattr(ctx, 'work_dir') else "./output", "litreview", slug)
+        work_dir = os.path.join(ctx.work_dir, "litreview", slug)
         os.makedirs(os.path.join(work_dir, "papers"), exist_ok=True)
         
         system_prompt = load_skill_prompt("litreview") + faculty_skill_addendum(
@@ -302,8 +344,7 @@ class LiteratureAgent(BaseAgent):
         framework_prompt = f"Select a review framework for: {topic}. Output JSON: {{\"framework\": \"Decomposition\", \"sub_areas\": [\"Problem\", \"Solution\"]}}"
         fw_res = self.llm.generate(prompt=framework_prompt, system_prompt=system_prompt)
         try:
-            if fw_res.startswith("```json"): fw_res = fw_res[7:-3].strip()
-            elif fw_res.startswith("```"): fw_res = fw_res[3:-3].strip()
+            fw_res = strip_code_fence(fw_res)
             fw_data = json.loads(fw_res)
             sub_areas = fw_data.get("sub_areas", ["Overview"])
         except Exception:
@@ -336,8 +377,7 @@ class LiteratureAgent(BaseAgent):
         res = self.llm.generate(prompt=synth_prompt, system_prompt=system_prompt + "\n\nYou MUST return ONLY valid JSON.")
         
         try:
-            if res.startswith("```json"): res = res[7:-3].strip()
-            elif res.startswith("```"): res = res[3:-3].strip()
+            res = strip_code_fence(res)
             data = ResearchFindings.model_validate_json(res)
             ctx.research.literature_context = data.findings
             ctx.research.literature_summary = "\n".join(data.findings)
@@ -350,7 +390,6 @@ class LiteratureAgent(BaseAgent):
         self.log(ctx, f"LitReview Protocol complete. Artifacts saved in {work_dir}")
 
 
-import csv
 class GapFinder(BaseAgent):
     def __init__(self, bus: SupervisorBus):
         super().__init__("GapFinder", layer=3, bus=bus)
@@ -361,7 +400,7 @@ class GapFinder(BaseAgent):
         slug = topic.replace(" ", "_")[:20].lower()
         
         # Phase 1: Setup working directory
-        work_dir = os.path.join(ctx.work_dir if hasattr(ctx, 'work_dir') else "./output", "deep_research", slug)
+        work_dir = os.path.join(ctx.work_dir, "deep_research", slug)
         os.makedirs(os.path.join(work_dir, "sources"), exist_ok=True)
         os.makedirs(os.path.join(work_dir, "findings"), exist_ok=True)
         
@@ -376,8 +415,7 @@ class GapFinder(BaseAgent):
         
         search_queries = [f"{topic} missing research gaps"]
         try:
-            if plan_res.startswith("```json"): plan_res = plan_res[7:-3].strip()
-            elif plan_res.startswith("```"): plan_res = plan_res[3:-3].strip()
+            plan_res = strip_code_fence(plan_res)
             plan_data = json.loads(plan_res)
             with open(os.path.join(work_dir, "plan.md"), "w") as f:
                 f.write(f"# Plan\nScope: {plan_data.get('scope')}\nHypotheses: {plan_data.get('hypotheses')}")
@@ -419,8 +457,7 @@ class GapFinder(BaseAgent):
         res = self.llm.generate(prompt=synthesis_prompt, system_prompt=system_prompt + "\n\nYou MUST return ONLY valid JSON.")
         
         try:
-            if res.startswith("```json"): res = res[7:-3].strip()
-            elif res.startswith("```"): res = res[3:-3].strip()
+            res = strip_code_fence(res)
             data = ResearchFindings.model_validate_json(res)
             ctx.research.novelty_gaps = data.findings
             
@@ -468,7 +505,7 @@ class FacultyProfileAgent(BaseAgent):
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Loading faculty profiles for institutional grounding...")
         profiles_dir = os.path.join(
-            getattr(ctx, "work_dir", None) or "./output", "faculty_profiles"
+            ctx.work_dir, "faculty_profiles"
         )
         if not os.path.exists(profiles_dir):
             self.log(
@@ -512,16 +549,9 @@ class ResearchOrchestrator(BaseAgent):
         self.electronics_agent = ElectronicsAgent(bus)
         self.lit_agent = LiteratureAgent(bus)
         self.gap_finder = GapFinder(bus)
-        self.faculty_agent = FacultyProfileAgent(bus)
 
     def run(self, ctx: PipelineContext) -> None:
         self.log(ctx, "Initializing Layer 3 Research Execution (sequential, merge-safe)...")
-
-        # Faculty may already be loaded by LangGraph faculty node; load if empty
-        if not ctx.research.faculty_context:
-            self.faculty_agent.run(ctx)
-        elif ctx.research.faculty_context:
-            self.log(ctx, f"Using {len(ctx.research.faculty_context)} preloaded faculty profiles.")
 
         for agent in (
             self.arxiv_agent,
