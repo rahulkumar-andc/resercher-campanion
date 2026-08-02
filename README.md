@@ -1,267 +1,187 @@
-# 🔬 Autonomous Research Companion (ARC)
+# Autonomous Research Companion (ARC)
 
-> **Ethical & Defensive Research Automation Framework**  
-> *Transforming raw codebases and notes into structured, highly dense academic research papers, presentation decks, and BibTeX citations.*
+> **Ethical & defensive research automation**  
+> Turns a research topic plus optional code, notes/PDFs, or a GitHub URL into a markdown manuscript, PDF, PPTX, and BibTeX.
+
+For implementation detail see [`architecture.md`](architecture.md).
 
 ---
 
-## 📌 Safety & Responsible Use Banner
+## Safety & responsible use
 
 > [!IMPORTANT]
-> **Defensive Security & Research Scope Statement**  
-> This system is designed exclusively for ethical bug bounty hunting, defensive software engineering research, automated documentation, and academic analysis.  
-> - **Dense Fact-Driven Analytics**: Exclusively leverages LLMs to produce concise, factual reports devoid of generic fluff.
-> - **Dry-Run Mode**: Supports offline fallback execution.
-> - **Zero Vulnerability Exploitation**: Analyzes code weaknesses solely for defensive remediation and academic grounding.
+> **Defensive research scope**  
+> Built for ethical bug bounty context, defensive software research, documentation, and academic analysis.
+>
+> - Analyzes code for remediation and academic grounding — not exploitation.
+> - ArXiv failures return an empty citation list (no fabricated papers).
+> - Layer 4.5 QA scores are **local heuristics**, not commercial plagiarism/AI detectors.
+> - Bind the dashboard only on trusted networks; uploads and Layer 0 can execute Python in a subprocess sandbox.
 
 ---
 
-## 🏗️ 6-Layer Multi-Agent Architecture (LangGraph Powered)
+## Architecture (LangGraph)
 
-Powered by **LangGraph** and a persistent **SQLite Checkpointer**, ARC coordinates a highly resilient 6-layer agent mesh:
+Powered by **LangGraph** with a **SQLite checkpointer** (`checkpoints.sqlite`). Shared state is `PipelineContext`.
 
 ```mermaid
 flowchart TD
-    %% Define Styles
-    classDef supervisor fill:#8e44ad,stroke:#5b2c6f,color:white,stroke-width:4px;
-    classDef l1 fill:#3498db,stroke:#2980b9,color:white;
-    classDef l2 fill:#e74c3c,stroke:#c0392b,color:white;
-    classDef l3 fill:#2ecc71,stroke:#27ae60,color:white;
-    classDef l4 fill:#f39c12,stroke:#d68910,color:white;
-    classDef l45 fill:#d35400,stroke:#a04000,color:white;
-    classDef l5 fill:#34495e,stroke:#2c3e50,color:white;
-    classDef io fill:#95a5a6,stroke:#7f8c8d,color:black,stroke-dasharray: 5 5;
-    
-    %% Inputs (User Data)
-    subgraph IODisks [User Input Sources]
-        direction LR
-        RawCode[(Raw Source Code)]:::io
-        RawNotes[(PDFs & User Notes)]:::io
-        RawTopic[(Topic String)]:::io
-    end
-    
-    %% Central Hub / Brain (Event Bus)
-    Sup((Layer 6: LangGraph Supervisor)):::supervisor
-
-    %% LAYER 1: INPUT & PARSING
-    subgraph Layer1 [Layer 1: Input & Parsing]
-        direction LR
-        GI(Git Ingestor):::l1
-        CI(Code Ingestor):::l1
-        DI(Data Ingestor):::l1
-        SA(Style Agent):::l1
-        QP(Query Parser):::l1
-    end
-    
-    %% LAYER 2: CODE ANALYSIS
-    subgraph Layer2 [Layer 2: Code Analysis]
-        direction LR
-        CB(Code Breaker):::l2
-        AD(Algo Detector):::l2
-        CA(Complexity Analyzer):::l2
-        HM(HW Mapper):::l2
-        BE(Bug & Edge Case):::l2
-    end
-    
-    %% LAYER 3: RESEARCH & GROUNDING
-    subgraph Layer3 [Layer 3: Research & Grounding]
-        direction LR
-        WSA(Web Search):::l3
-        AA(ArXiv Agent):::l3
-        CSA(CS Agent):::l3
-        EA(Electronics Agent):::l3
-        LA(Literature Agent):::l3
-        GF(Gap Finder):::l3
-    end
-    
-    %% LAYER 4: SYNTHESIS & STRUCTURE
-    subgraph Layer4 [Layer 4: Synthesis & Structure]
-        direction LR
-        Conn(Connector):::l4
-        OB(Outline Builder):::l4
-        Cit(Citation Agent):::l4
-        Crit(Critic Agent):::l4
-    end
-
-    %% LAYER 4.5: QUALITY AUDIT & PEER REVIEW
-    subgraph Layer45 [Layer 4.5: Quality Audit & Peer Review]
-        direction LR
-        PC(Plagiarism Checker):::l45
-        PR(Plagiarism Remediator):::l45
-        AI(AI Percentage Auditor):::l45
-        PRV(Peer Reviewer Agent):::l45
-        FQA(Format Quality Auditor):::l45
-    end
-    
-    %% LAYER 5: OUTPUT GENERATION
-    subgraph Layer5 [Layer 5: Local LLM Output]
-        direction LR
-        WA(Writer Agent - Ollama):::l5
-        PDF(PDF Exporter):::l5
-        PPT(PPT Exporter):::l5
-    end
-    
-    %% Outputs (Deliverables)
-    subgraph Deliverables [Final Export]
-        direction LR
-        OutPDF[(ResearchPaper.pdf)]:::io
-        OutPPT[(Presentation.pptx)]:::io
-        OutBIB[(References.bib)]:::io
-    end
-
-    %% --- FULLY CONNECTED WIRES & DATA FLOW ---
-
-    %% 1. Input Source Wires -> Layer 1 Agents
-    RawCode -->|"Raw Files"| CI
-    RawNotes -->|"Text & Metadata"| DI
-    RawNotes -->|"Style Samples"| SA
-    RawTopic -->|"Topic String"| QP
-
-    %% 2. Layer 1 -> Layer 2 & 3 Wires
-    CI -->|"AST Trees & Tokens"| CB & AD & CA & HM & BE
-    DI -->|"Parsed JSON Notes"| LA
-    QP -->|"Sub-queries"| AA & CSA & EA
-    SA -->|"Style Fingerprint"| WA
-
-    %% 3. Layer 2 Code Analysis Wires -> Layer 3 & 4
-    CB -->|"Function Blocks"| AA
-    AD -->|"Algorithm Types"| CSA
-    CA -->|"Big-O Metrics"| Conn
-    HM -->|"Hardware Specs"| EA
-    BE -->|"Code Weaknesses"| GF
-
-    %% 4. Layer 3 Research Wires -> Layer 4 Synthesis
-    AA -->|"BibTeX & Papers"| Cit & Conn
-    CSA -->|"CS Benchmarks"| Conn
-    EA -->|"Circuit Specs"| Conn
-    LA -->|"Background Knowledge"| Conn
-    GF -->|"Identified Research Gaps"| OB
-
-    %% 5. Layer 4 Synthesis Wires -> Layer 5 Writer
-    Conn -->|"Unified Context"| WA
-    OB -->|"Section Outlines"| WA
-    Cit -->|"IEEE/ACM References"| WA
-    WA <-->|"Draft Review & Feedback"| Crit
-
-    %% 6. Layer 5 Writer -> Layer 4.5 Quality Audit Wires
-    WA -->|"Draft Manuscript"| PC & AI & PRV & FQA
-
-    %% 7. Layer 4.5 Self-Healing Feedback Loop Wires
-    PC -.->|"Similarity > 15%"| PR
-    AI -.->|"AI Score > 10%"| PR
-    PR -.->|"Re-synthesized Text"| WA
-    PRV -.->|"Reviewer Questions"| OB
-    FQA -.->|"Grammar Fixes"| WA
-
-    %% 8. Approved QA -> Exporters & Deliverables
-    PC & AI & PRV & FQA -->|"Quality Approved"| PDF & PPT & Cit
-    PDF -->|"Rendered PDF"| OutPDF
-    PPT -->|"Rendered Deck"| OutPPT
-    Cit -->|"BibTeX Export"| OutBIB
-
-    %% 9. Layer 6 Supervisor Event Bus Monitoring (All Agents)
-    Sup <.-> GI & CI & DI & SA & QP
-    Sup <.-> CB & AD & CA & HM & BE
-    Sup <.-> WSA & AA & CSA & EA & LA & GF
-    Sup <.-> Conn & OB & Cit & Crit
-    Sup <.-> PC & PR & AI & PRV & FQA
-    Sup <.-> WA & PDF & PPT
+  START([START]) --> L0[L0 Profiler]
+  L0 --> L1[L1 Ingest: Git / Code / Notes / Style / Query]
+  L1 --> L3FAC[L3 Faculty load]
+  L3FAC --> RES[L2+L3 Research]
+  RES --> L4[L4 Connector / Outline / Citation / Critic]
+  L4 --> L5[L5 Section writers]
+  L5 --> QA[L4.5 Heuristic QA]
+  QA -->|fail and retries left| REM[Remediate]
+  REM --> L5
+  QA -->|pass or max retries| EXP[PDF / PPTX / Eval]
+  EXP --> ENDN([END])
 ```
+
+| Layer | Role |
+|------|------|
+| **0** | Subprocess sandbox profiler for uploaded `.py` (timeout; not in-process `exec`) |
+| **1** | Git clone, code/notes ingest, style fingerprint, query parse |
+| **2** | AST / heuristic code analysis (skipped or light in some job modes) |
+| **3** | ArXiv, DuckDuckGo web search, skill-driven research, faculty JSON |
+| **4** | Unified context, outline, citations, pre-write critic |
+| **4.5** | Local n-gram / style / peer / format / fact heuristics after writing |
+| **5** | Section writers + PDF / PPTX / BibTeX exporters |
+| **6** | LangGraph supervisor + event bus + checkpoints |
+| **7** | FastAPI dashboard (`src/web/dashboard.py`) |
+
+**Critical rule:** QA runs **after** the writer. The remediator cannot force-approve; scores are recomputed on the next QA pass (max 2 remediation loops).
+
+### LLM policy
+
+| Role | Backend |
+|------|---------|
+| Non-writing agents | Local Ollama (`ARC_LOCAL_MODEL`, default `llama3.1:latest`) |
+| Layer 5 writing | Optional Mistral cloud when `CLOUD_LLM_API_KEY` is set (`ARC_WRITING_USE_CLOUD=1` by default) |
+| Writing fallback | Local Ollama if cloud is missing or disabled |
+
+Skills load as **prompt text** from Claude-plugin `SKILL.md` trees (preferred) or flat `src/skills/*.md`. Plugin helper scripts / MCP / grill-me are **not** executed by LangGraph.
 
 ---
 
-## 🌟 Key Features & Recent Upgrades
+## Key features
 
-1. **Ollama Local LLM Integration**: Generates deep, factual analytical reports locally using models like `llama3.1` or `qwen2.5-coder`. Automatically injects detected novelty gaps and algorithm complexities directly into the LLM synthesis prompt.
-2. **Persistent Checkpointing**: Utilizes `langgraph.checkpoint.sqlite.SqliteSaver` to persist multi-agent job states safely to `checkpoints.sqlite`, preventing data loss during complex research execution.
-3. **Real-time Telemetry WebSocket**: Live backend logs stream directly into a front-end "Hacker-Style" terminal UI while the agents work.
-4. **Interactive Dashboards**:
-   - `/`: Main interactive launcher and hacker terminal.
-   - `/nn`: Live 3D Force-Graph visualization of agent topologies.
-   - `/nn2d`: Interactive 2D Network graph of the agent state space.
-   - `/vault`: A persistent Artifacts Vault for browsing and downloading generated PDFs and PPTXs.
+- **Job modes:** `full_paper`, `literature_review`, `research_only`, `complete_draft`
+- **Inputs:** topic, code/notes upload, GitHub URL, optional draft text
+- **Writer modes:** multi-section writers or single writer
+- **Live telemetry:** WebSocket agent logs, progress %, job history
+- **Artifacts:** `{job_id}_ResearchPaper.pdf`, `{job_id}_Presentation.pptx`, `references.bib`
+- **Checkpoint / resume:** LangGraph `SqliteSaver`; job metadata in SQLite
+- **Optional humanizer:** GPT-2 perplexity extras via `requirements-humanizer.txt`
 
 ### QA limitations
 
-ARC's QA values are local heuristic estimates, not externally validated scores. The corpus-overlap value compares n-grams against context already provided to the pipeline; it is not a plagiarism-database result. The AI-style value uses local buzzword and passive-voice signals; it is not an AI-authorship determination. Fact checking only compares selected statistics with collected context text and does not verify claims. Use independent plagiarism, authorship, and fact-verification services for publication or compliance decisions.
+ARC QA values are local heuristic estimates, not externally validated scores:
+
+- Corpus-overlap compares n-grams against pipeline context — not a plagiarism database.
+- AI-style uses buzzword / passive-voice signals — not an authorship verdict.
+- Fact checking compares selected stats to collected context — not claim verification.
+
+Use independent plagiarism, authorship, and fact-verification services for publication or compliance.
 
 ---
 
-## 📦 Project Directory Structure
+## Project layout
 
 ```
 reserch-campanion/
-├── main.py                    # FastAPI Web Server Launcher
-├── run_cli.py                 # Direct CLI Execution Engine
-├── checkpoints.sqlite         # Persistent LangGraph Job States
-├── src/                       # Core Source Code
-│   ├── agents/                # 6-Layer Multi-Agent Classes
-│   │   ├── layer1_input.py
-│   │   ├── layer2_code.py
-│   │   ├── layer3_research.py
-│   │   ├── layer4_synthesis.py
-│   │   ├── layer5_output.py   # Ollama LLM Synthesis integration
-│   │   └── layer6_supervisor.py # LangGraph Orchestrator
-│   ├── core/                  
-│   │   ├── llm_client.py      # Ollama Interoperability (300s timeout logic)
-│   │   └── event_bus.py       # Live WebSocket Event Emitter
-│   ├── exporters/             # Document Exporters (ReportLab & PPTX)
-│   └── web/                   # FastAPI Web UI Backend
-│       ├── app.py             
-│       └── static/            
-│           ├── index.html     # Main Launcher UI
-│           ├── vault.html     # Artifacts Vault
-│           ├── nn.html        # 3D Agent Topology
-│           └── nn_2d.html     # 2D Agent Topology
-└── output/                    # Generated Deliverables
-    ├── ResearchPaper.pdf
-    ├── ResearchPaper.md
-    └── Presentation.pptx
+├── main.py                 # CLI pipeline (+ --web → legacy src.web.app)
+├── run_cli.py              # Alternate CLI entry
+├── run_job.py              # Demo / headless job helper
+├── architecture.md         # Honest architecture notes
+├── requirements.txt
+├── requirements-humanizer.txt   # Optional torch/transformers
+├── sample_data/
+├── src/
+│   ├── agents/             # layer0 … layer6 (+ layer4_5_qa)
+│   ├── core/               # models, llm_client, skills_loader, database, bus
+│   ├── exporters/          # PDF, PPTX, BibTeX
+│   ├── skills/             # Flat prompts + Claude-plugin skill trees
+│   └── web/
+│       ├── dashboard.py    # Primary control-center UI/API (recommended)
+│       ├── app.py          # Legacy static UI (nn / vault / index)
+│       └── static/
+└── output/                 # Job uploads + generated deliverables
 ```
 
 ---
 
-## 🚀 Quick Start Guide
+## Quick start
 
-### 1. Prerequisites & Installation
+### 1. Prerequisites
 
-You must have [Ollama](https://ollama.com/) running locally with at least one compatible model (e.g., `ollama run llama3.1`).
+- Python 3.10+
+- [Ollama](https://ollama.com/) with a chat model, e.g. `ollama pull llama3.1`
+- Optional: `CLOUD_LLM_API_KEY` for cloud writing
 
 ```bash
-# Clone the repository
 cd reserch-campanion
-
-# Install Python dependencies
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-# Optional: enable local GPT-2 perplexity scoring in HumanizerPipeline
+# Optional: local GPT-2 perplexity for HumanizerPipeline
 pip install -r requirements-humanizer.txt
 ```
 
-### 2. Launching Interactive Web Dashboard
+### 2. Environment (optional `.env`)
 
-Launch the FastAPI backend with real-time WebSocket terminal log streaming:
+| Variable | Purpose |
+|----------|---------|
+| `OLLAMA_BASE_URL` | Default `http://localhost:11434` |
+| `ARC_LOCAL_MODEL` | Default `llama3.1:latest` |
+| `CLOUD_LLM_API_KEY` | Enables Layer 5 cloud writing |
+| `ARC_WRITING_USE_CLOUD` | `1` (default) / `0` to force local writing |
+| `ARC_WRITING_MODEL` | Default `mistral-large-latest` |
+
+### 3. Launch the dashboard (recommended)
 
 ```bash
-python main.py
+PYTHONPATH=$(pwd) uvicorn src.web.dashboard:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open your browser at:  
-👉 **`http://localhost:8000`**
+Open **http://127.0.0.1:8000**
 
-### 3. Running via Command Line Interface (CLI)
-
-Generate a complete paper and deck silently from the command line:
+Legacy UI (static `index` / `vault` / `nn`):
 
 ```bash
-python run_cli.py \
+python main.py --web --port 8000
+```
+
+### 4. CLI pipeline
+
+```bash
+PYTHONPATH=$(pwd) python main.py \
   --topic "Distributed Asynchronous Agent Architecture" \
   --code ./sample_data/sample_code.py \
   --notes ./sample_data/sample_notes.txt \
-  --output ./output
+  --out ./output
+```
+
+Outputs land under `./output/` as `{job_id}_ResearchPaper.pdf` and `{job_id}_Presentation.pptx`.
+
+### 5. Tests
+
+```bash
+PYTHONPATH=$(pwd) python -m unittest discover -s tests -v
 ```
 
 ---
 
-## 🛡️ License & Ethical Disclosure
+## Security notes
 
-Built as a defensive security research tool. Redistribution or usage must align with ethical software disclosure standards.
+- Prefer binding to `127.0.0.1` unless you add authentication.
+- Layer 0 runs uploaded `.py` in a short-lived subprocess — treat uploads as untrusted.
+- Git ingest clones user-provided URLs; use only trusted repos.
+- Keep secrets in environment / `.env` (gitignored); never commit API keys.
+
+---
+
+## License & ethics
+
+Built as a defensive research tool. Redistribution and use should follow ethical disclosure and academic integrity standards.
